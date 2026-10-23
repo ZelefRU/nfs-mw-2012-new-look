@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------- the sky
-// The game's sky (NFSLight_sky.txt, shader "BaseCloudSampler..4 | BaseCloudColour", drawn first in the lighting run as
+// The game's sky (NewLook_sky.txt, shader "BaseCloudSampler..4 | BaseCloudColour", drawn first in the lighting run as
 // a dome, 1080 vertices): sky = the key light's glow (pow(dot(v, KeyLightDir), SunColour.w) x SunColour) + a height
 // gradient (GradientTextureA / B at v4.z, mixed by v4.w) x BaseCloudColour.w; then 4 cloud layers (256x64 strips at
 // v2.xy, v2.zw, v3.xy, v3.zw): each over it by saturate((alpha - CloudParamsPS[i]) x CloudParamsPS2.y), coloured

@@ -13,10 +13,10 @@ Resource types (burnout.wiki "Resource Types", Most Wanted): 0x50 InstanceList, 
 
 ## Baking the world editor's edits (1.58)
 - In game (Ctrl+J): select props, Ctrl+D makes copies (1 m along x, then selected: move / turn / scale them); Del on a
-  copy deletes it; moves and hides of props as before. Saved in scripts/NFSLight_world.txt ("copy" lines).
+  copy deletes it; moves and hides of props as before. Saved in scripts/NewLook_world.txt ("copy" lines).
 - `bake.bat`: shows what would go into the track units; `bake.bat --write` (the game closed) writes them: props moved,
   removed (hidden), copies added (new ids), the originals kept in orig/ (restore.bat), the baked lines taken out of
-  NFSLight_world.txt (the old one kept as NFSLight_world_before_bake_<time>.txt).
+  NewLook_world.txt (the old one kept as NewLook_world_before_bake_<time>.txt).
 - Not baked (stay as the mod's runtime edits): the city's static models (InstanceList 0x50: their collision is in the
   PolygonSoupList, it would not follow) and pieces of models.
 

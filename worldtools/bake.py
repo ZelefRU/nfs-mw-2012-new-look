@@ -2,14 +2,14 @@
 
   bake.py            what would be done (nothing written)
   bake.py --write    do it (the game must be closed): units rewritten (their originals kept in worldtools/orig on first
-                     change), the baked lines taken out of scripts/NFSLight_world.txt (the old file kept beside it)
+                     change), the baked lines taken out of scripts/NewLook_world.txt (the old file kept beside it)
 
-NFSLight_world.txt lines (the world editor, Ctrl+J):
+NewLook_world.txt lines (the world editor, Ctrl+J):
   obj x y z tag [hide] [move dx dy dz turn deg scale s]     an object where the game puts it (cm), its axes' tag
   copy x y z tag n move dx dy dz turn deg scale s           a copy of the object at x y z (Ctrl+D)
-A prop is found by its place (within 2 cm) and its axes' tag (as NFSLight computes it); other objects (the city's
+A prop is found by its place (within 2 cm) and its axes' tag (as NewLook computes it); other objects (the city's
 static models, pieces of them) are not props: their lines stay (the mod keeps drawing them edited).
-The edit on a matrix (as NFSLight): each axis row turned about the vertical (x' = c x + s z, z' = -s x + c z) and
+The edit on a matrix (as NewLook): each axis row turned about the vertical (x' = c x + s z, z' = -s x + c z) and
 scaled, the position moved.
 """
 import sys, os, re, math, shutil, struct, time, subprocess
@@ -18,12 +18,12 @@ import bndw, props
 
 GAME = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..'))
 HAWAII = os.path.join(GAME, 'HAWAII')
-WORLD = os.path.join(GAME, 'scripts', 'NFSLight_world.txt')
+WORLD = os.path.join(GAME, 'scripts', 'NewLook_world.txt')
 if '--world' in sys.argv: WORLD = sys.argv[sys.argv.index('--world') + 1]   # (tests)
 ORIG = os.path.join(os.path.dirname(__file__), 'orig')
 
 
-def tag(X):   # NFSLight's WeTag of the axes (FNV-1a over round(x * 256))
+def tag(X):   # NewLook's WeTag of the axes (FNV-1a over round(x * 256))
     h = 2166136261
     for i in range(3):
         for j in range(3):
@@ -142,7 +142,7 @@ def main():
         for i, m, iid, e in pl['add']:
             print('   copy   of prop %d -> %.2f %.2f %.2f (id %x)' % (i, m[12], m[13], m[14], iid))
     for e, why in kept:
-        print('kept in NFSLight_world.txt (line %d, %s at %.2f %.2f %.2f): %s' % ((e['line'] + 1, e['kind']) + e['pos'] + (why,)))
+        print('kept in NewLook_world.txt (line %d, %s at %.2f %.2f %.2f): %s' % ((e['line'] + 1, e['kind']) + e['pos'] + (why,)))
     if not plan:
         print('nothing to bake')
         return
@@ -177,7 +177,7 @@ def main():
     shutil.copy2(WORLD, WORLD[:-4] + '_before_bake_%s.txt' % stamp)
     lines = open(WORLD, encoding='utf-8', errors='replace').read().splitlines(True)
     open(WORLD, 'w', encoding='utf-8').write(''.join(l for n, l in enumerate(lines) if n not in baked))
-    print('NFSLight_world.txt: %d baked lines taken out (the old file: NFSLight_world_before_bake_%s.txt)' % (len(baked), stamp))
+    print('NewLook_world.txt: %d baked lines taken out (the old file: NewLook_world_before_bake_%s.txt)' % (len(baked), stamp))
 
 
 main()

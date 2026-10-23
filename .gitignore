@@ -5,7 +5,7 @@ build/
 *.pdb
 *.bak
 *.log
-NFSLight_cache/
+NewLook_cache/
 worldtools/orig/
 worldtools/export/
 *.BNDL

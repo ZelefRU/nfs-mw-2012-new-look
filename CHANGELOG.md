@@ -1,7 +1,10 @@
 # Changelog
 
+NewLook was called NFSLight up to 1.63.
+
 Newest first. Every entry is detailed in [docs/DEVLOG.md](docs/DEVLOG.md).
 
+- 1.64 (2026-10-24): renamed NFSLight -> NewLook (old files renamed at the first start)
 - 1.63 (2026-10-20): ShadowOnly (test): one of our sun maps alone
 - 1.62 (2026-10-20, HLSL only): tail lights, under cars, dawn reflections, low-sun cascades
 - 1.61 (2026-10-19, HLSL only): far buildings' shadows where the cascades meet

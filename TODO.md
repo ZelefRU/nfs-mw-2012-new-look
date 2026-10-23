@@ -1,4 +1,4 @@
-# NFSLight: what is left to fix (1.63, 2026-10-24)
+# NewLook (formerly NFSLight): what is left to fix (1.64, 2026-10-24)
 
 One list: what is open after 1.59-1.63, what waits for a decision, and the older polish list (2026-10-15).
 Rule: features first, polish later; items marked (check) are fixed but not yet seen in game.

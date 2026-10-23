@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------- texture replacement (1.09)
 // Every texture the game creates with its data (CreateTexture2D with initial data) gets a fingerprint: a 64-bit hash of
-// its top mip level, its size and format. A file NFSLight_textures\replace\<hash>.dds (the first 16 characters of its
+// its top mip level, its size and format. A file NewLook_textures\replace\<hash>.dds (the first 16 characters of its
 // name) is created instead: any size, any number of mip levels, the format of the file (the views the game makes of it
 // are given that format: CreateShaderResourceView is hooked too; sRGB follows the game's own choice).
 // Finding which file to make: Shift+X picks the material at the screen centre: the next frame every G-buffer draw is
 // drawn once more with its number into an ID target (depth test "equal or nearer", nothing written to the game's
-// targets), the number under the centre read back; that draw's textures are saved as DDS into NFSLight_textures\picked
+// targets), the number under the centre read back; that draw's textures are saved as DDS into NewLook_textures\picked
 // (<n>_<slot name>_<hash>.dds), each named after the game's own sampler name (DiffuseTextureSampler, Normal..., ...).
 // Edit / replace a picked file, rename it to the hash alone (or keep the name: only its first 16 characters count) and
 // put it in replace\; it is used when the game next loads that texture (re-enter the area or restart the game).
@@ -134,7 +134,7 @@ static bool TxHasRepl(unsigned long long h)
 
 static void TxScan()
 {
-    sprintf(g_txDir, "%sNFSLight_textures", g_dir);
+    sprintf(g_txDir, "%sNewLook_textures", g_dir);
     CreateDirectoryA(g_txDir, 0);
     char p[MAX_PATH];
     sprintf(p, "%s\\replace", g_txDir); CreateDirectoryA(p, 0);
@@ -507,7 +507,7 @@ static HRESULT STDMETHODCALLTYPE HkMap(ID3D11DeviceContext* ctx, ID3D11Resource*
     HRESULT hr = oMap(ctx, r, sub, type, flags, m);
     if (g_cbsCopy && SUCCEEDED(hr) && sub == 0) CbsOnMap(r, type, m);   // an object's constants: written into our copy (worldedit.inc)
     // (1.13: staging textures only: a dynamic one the game rewrites twice a second was hashed at every Unmap, read back
-    // from GPU memory: a stutter twice a second, even with NFSLight off)
+    // from GPU memory: a stutter twice a second, even with NewLook off)
     if (SUCCEEDED(hr) && m && sub == 0 && type != D3D11_MAP_READ && g_txLockInit && TxIsTex2D(r) && TxIsStaging((ID3D11Texture2D*)r)) {
         EnterCriticalSection(&g_txLock);
         TxInfo* e = TxFind((ID3D11Texture2D*)r, false);
@@ -823,7 +823,7 @@ static void TxPickFrame()
                     }
                     break;
                 }
-                sprintf(g_lampMsg, "texture pick %d: %d textures saved to NFSLight_textures\\picked (see the log)", pickNo, saved);
+                sprintf(g_lampMsg, "texture pick %d: %d textures saved to NewLook_textures\\picked (see the log)", pickNo, saved);
             }
         }
         PickRelease();

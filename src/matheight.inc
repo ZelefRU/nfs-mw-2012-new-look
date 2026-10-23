@@ -3,7 +3,7 @@
 // LightMap on the second uv, Normal (BC1, tangent space with T = v4, B = v5, N = v2), a reflection cube, a Fresnel LUT,
 // Tonemap) has no depth map. One is made from its normal map: the surface whose slopes the normal map holds,
 // recovered by Frankot-Chellappa integration (FFT: H = -i (wu P + wv Q) / (wu^2 + wv^2)), at most 512^2, on a worker
-// thread, the first time a normal map is drawn with this shader; kept on disk (NFSLight_textures\height_auto\<normal
+// thread, the first time a normal map is drawn with this shader; kept on disk (NewLook_textures\height_auto\<normal
 // map hash>.dds) for the next time. A file replace\<normal map hash>_height.dds is used instead when there is one.
 // Two channels: R with the normal map's green as +slope along v, G as -slope (normal maps come in both conventions;
 // the shader picks per pixel by comparing the game's bitangent with the direction v grows on the surface).

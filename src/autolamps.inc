@@ -3,7 +3,7 @@
 // post's own axes, with their colour / group. While driving, every 8th frame the draws of a template's mesh have
 // their constants copied (the post's world matrix is in them) and read back a few frames later; every standing post
 // of that kind without lamps gets the template's lamps, tied to it (so they go out when it is knocked down).
-// Templates: NFSLight_lamp_templates.txt. Make one: select a lamp tied to a post (picked this session), Shift+I.
+// Templates: NewLook_lamp_templates.txt. Make one: select a lamp tied to a post (picked this session), Shift+I.
 
 struct TplBulb { float local[3], c[3]; int group; };
 struct Template {
@@ -19,7 +19,7 @@ static void TplSave()
 {
     FILE* f = fopen(g_tplPath, "w");
     if (!f) return;
-    fprintf(f, "# NFSLight lamp templates: mesh (index count, start index, base vertex, vertex stride), constants slot / offset of\n"
+    fprintf(f, "# NewLook lamp templates: mesh (index count, start index, base vertex, vertex stride), constants slot / offset of\n"
                "# its position, then per lamp: local x y z (in the post's axes), r g b, group. Made with Shift+I.\n");
     for (int t = 0; t < g_tplCount; ++t) {
         const Template& T = g_tpl[t];

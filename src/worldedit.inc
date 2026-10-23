@@ -7,7 +7,7 @@
 // picture, the game's and our shadow maps, reflections). An edited key: hidden = the draw is skipped; moved = drawn
 // with a constant buffer of ours holding the changed matrix (put back after our shadow replays of it).
 // Picking: one frame every G-buffer draw writes its number into an ID target, the one seen at the cross wins.
-// Saved to NFSLight_world.txt at every change.
+// Saved to NewLook_world.txt at every change.
 
 static bool Pressed(int vk, bool repeat);
 // the message line of the menu (g_lampMsg), cut to fit
@@ -33,7 +33,7 @@ struct CbShadow {
 };
 static const int kCbsSlots = 2048;
 static CbShadow g_cbs[kCbsSlots];
-static int g_cbsN;               // (g_cbsOn, nfslight.cpp: the game's writes go through our copies)
+static int g_cbsN;               // (g_cbsOn, newlook.cpp: the game's writes go through our copies)
 static unsigned g_cbsSizes[8], g_cbsSizeN;   // the sizes seen (the log)
 
 static CbShadow* CbsFind(const void* r)
@@ -166,7 +166,7 @@ static WeEdit g_weEd[kWeMax];
 static int g_weN;
 static short g_weIdx[8192];       // key -> edit + 1
 static char g_wePath[MAX_PATH];
-static bool g_weApply = true, g_weShowHidden;   // (g_weOn: nfslight.cpp)
+static bool g_weApply = true, g_weShowHidden;   // (g_weOn: newlook.cpp)
 static int g_weMoved, g_weHidden;   // counts (the menu)
 static unsigned long long g_wePartModel[2048];   // models with edited parts (open addressing, 0 = empty)
 static unsigned g_weVer = 1;                     // +1 at every change of the edits (the meshes' part lists follow)
@@ -328,7 +328,7 @@ static void WeSave()
 {
     FILE* f = fopen(g_wePath, "w");
     if (!f) { Log("world editor: %s could not be written", g_wePath); return; }
-    fprintf(f, "# NFSLight world edits (in game: Ctrl+J). One game object per line: where the game puts it (x y z in m) and the tag\n"
+    fprintf(f, "# NewLook world edits (in game: Ctrl+J). One game object per line: where the game puts it (x y z in m) and the tag\n"
                "# of its axes, [part: the box of one piece of it, its own units], then what is done to it: hide, and/or\n"
                "# move dx dy dz (m), turn (deg, about the vertical), scale.\n"
                "# copy x y z tag n move .. turn .. scale ..: a copy (Ctrl+D) of the object at x y z, placed from it\n"
@@ -506,7 +506,7 @@ static unsigned long long WeInstKey(ID3D11DeviceContext* ctx, VsInfo* e, const D
     return h ? h : 1;
 }
 
-// ---- per draw (WE_DRAW / WE_SKIP / WE_SUBST: nfslight.cpp)
+// ---- per draw (WE_DRAW / WE_SKIP / WE_SUBST: newlook.cpp)
 struct WeStats { unsigned draws, world, lay[5], noData, keyed, skipped, subst, pickRec, maskDraws; double cpu; };
 static WeStats g_weStat;
 static unsigned long long g_weKey;   // the key of the draw now going on (0: none)
@@ -807,7 +807,7 @@ static void WeTreat(WeMesh& m, unsigned long long key)
 }
 
 // the camera from the game's own view of the main pass (ViewProjectionModified: rows x, y, depth with their offsets,
-// then z scale, z bias, w scale, w bias): the editor works with NFSLight's effects off (no camera record of ours then)
+// then z scale, z bias, w scale, w bias): the editor works with NewLook's effects off (no camera record of ours then)
 static CbShadow* g_weCamCb;
 static unsigned g_weCamVer, g_weCamFrame;
 static void WeCamFrom(const float* r)
@@ -1255,7 +1255,7 @@ static void WeAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
 }
 
 // ---- the editor itself (input at Present)
-static int g_weHover;                // 1-3 arrows x y z, 4 the ring (g_weDrag: the one held, nfslight.cpp)
+static int g_weHover;                // 1-3 arrows x y z, 4 the ring (g_weDrag: the one held, newlook.cpp)
 static bool g_wePickPart;            // this pick wants a piece (middle button)
 static int g_wePickTries;
 static unsigned g_weRepickAt;        // the model's pieces were not read yet: pick again then

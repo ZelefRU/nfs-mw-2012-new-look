@@ -1,4 +1,4 @@
-// NFSLight: replaces the sun part of the game's deferred sun pass.
+// NewLook: replaces the sun part of the game's deferred sun pass.
 // Runs right after the game's own sun pass, with the game's vertex shader, viewport and
 // constant buffers still bound. tDest is a copy of what the game's pass produced; we take the
 // game's sun light out of it again (recomputed exactly like the game does it) and put it back

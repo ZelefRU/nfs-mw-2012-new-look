@@ -110,7 +110,7 @@ static void BptSave()
 {
     FILE* f = fopen(g_bptPath, "w");
     if (!f) return;
-    fprintf(f, "# NFSLight bench viewpoints (Ctrl+Shift+B stores DroneCam's free camera): x y z yaw pitch (rad) name\n");
+    fprintf(f, "# NewLook bench viewpoints (Ctrl+Shift+B stores DroneCam's free camera): x y z yaw pitch (rad) name\n");
     for (int i = 0; i < g_bptN; ++i)
         fprintf(f, "%.3f %.3f %.3f %.5f %.5f %s\n", g_bpt[i].pose[0], g_bpt[i].pose[1], g_bpt[i].pose[2], g_bpt[i].pose[3], g_bpt[i].pose[4], g_bpt[i].name);
     fclose(f);
@@ -264,7 +264,7 @@ static void BenchNextFx()
     if (DcHold()) DcHold()(0);
     if (g_benchCsv) { fclose(g_benchCsv); g_benchCsv = 0; }
     BenchRestore();
-    sprintf(g_lampMsg, "bench done in %.1f min: costs next to the settings, the table in NFSLight_bench_*.csv, the log (bench:)", (GetTickCount() - g_benchT0) / 60000.0);
+    sprintf(g_lampMsg, "bench done in %.1f min: costs next to the settings, the table in NewLook_bench_*.csv, the log (bench:)", (GetTickCount() - g_benchT0) / 60000.0);
     Log("bench: done");
 }
 
@@ -290,7 +290,7 @@ static void BenchStart(bool all, int one)
     if (all) {
         SYSTEMTIME st; GetLocalTime(&st);
         char p[MAX_PATH];
-        sprintf(p, "%sNFSLight_bench_%04d%02d%02d_%02d%02d.csv", g_dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+        sprintf(p, "%sNewLook_bench_%04d%02d%02d_%02d%02d.csv", g_dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
         g_benchCsv = fopen(p, "w");
         if (g_benchCsv) fprintf(g_benchCsv, "viewpoint,effect,off,on,gpu_off_ms,gpu_on_ms,cost_ms,noise_ms,gpu_bound,padding_ms,mod_passes_ms,cpu_frame_off,cpu_frame_on,mod_cpu_ms,kernel_busy_off_pct,kernel_busy_on_pct,unsteady_windows,top_passes\n");
         Log("bench: start: %d effects x %d viewpoint(s) -> %s", kFxN, g_benchPtN ? g_benchPtN : 1, p);

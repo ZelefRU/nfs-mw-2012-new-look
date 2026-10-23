@@ -117,7 +117,7 @@ static void BuildMenu()
     g_mlN = 0;
     // ---- title
     MNew();
-    MSegAdd(C_TITLE, "NFSLight 1.63   ");
+    MSegAdd(C_TITLE, "NewLook 1.64   ");
     MSegAdd(g_enabled ? C_ON : C_OFF, g_enabled ? "[ ON ]" : "[ OFF - the game's own picture ]");
     MSegAdd(C_DIM, "  Y      ");
     MSegAdd(C_TITLE, "view: ");

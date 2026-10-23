@@ -11,7 +11,7 @@
 //   up to date; cleared and drawn again only when the camera has gone a quarter of the cascade or the sun has moved.
 // 1.01-1.03 drew everything through a geometry shader into all four at once: 60+ ms of GPU (a geometry shader is
 // many times slower than plain drawing; 3700 draws a frame).
-// The sun pass then reads a shadow mask made per pixel (PS_SunMask, NFSLight.hlsl): the distance to the caster sets
+// The sun pass then reads a shadow mask made per pixel (PS_SunMask, NewLook.hlsl): the distance to the caster sets
 // the penumbra as a real sun does (0.53 deg: a shadow is sharp where it starts and softer away from its caster),
 // smoothed over frames (PS_SunTemporal).
 // 1.25: the mask (and its smoothing) at half the frame's resolution, a quarter of the pixels (it was 1.1-1.4 ms at
@@ -352,7 +352,7 @@ static float g_ssSun[3], g_ssCamP[3], g_ssCamV[3], g_ssFwd[3];
 // the bench at night showed our maps + mask at ~9 ms for a light too weak to matter); in full day the lamps are off
 // (unless "Map lamps by day"): ~4 ms of lighting nobody sees in the sun.
 static float g_ssDay = -1;                       // -1 = not known yet
-static bool g_ssNight;                           // with some hysteresis (g_ssFullDay: nfslight.cpp)
+static bool g_ssNight;                           // with some hysteresis (g_ssFullDay: newlook.cpp)
 static unsigned g_ssNightSince, g_ssDaySince;
 static bool g_ssSunKnown, g_ssCamKnown, g_ssFwdKnown;
 static unsigned g_ssCamF;                        // frame + 1 of the camera sample
@@ -381,7 +381,7 @@ static float g_ssGameHalf[3];                    // their half sizes (m; 0 = not
 // line; only where the azimuth moves well, not near the turns) and to the turns' marks (the azimuth 2.5 deg back from a
 // turn: a known phase); between, and through the turns, the line runs on. The phase we show follows the line, never
 // back, at most 3x ahead. At the start or after a jump: the branch from the way the azimuth goes (by day / night from
-// the key light until then). Learned and kept (NFSLight_sun.txt): the swing (c, r: its turns' azimuths, whatever the
+// the key light until then). Learned and kept (NewLook_sun.txt): the swing (c, r: its turns' azimuths, whatever the
 // phase), the phases the sun comes on and goes off, the noon height, the day's length (the switches and the noon once
 // the swing is known). Ours: the sun rises at the horizon when the game's comes on and sets when it goes off, on an arc
 // (rises at c + 90 deg on the side the game's day starts, noon at c, height M, sets opposite):
@@ -425,12 +425,12 @@ static double SpHalf(double x) { return x - floor(x + 0.5); }   // -0.5..0.5
 static void SunPathFile(bool save)
 {
     char p[MAX_PATH];
-    sprintf(p, "%sNFSLight_sun.txt", g_dir);
+    sprintf(p, "%sNewLook_sun.txt", g_dir);
     if (save) {
         FILE* f = fopen(p, "w");
         if (f) {
             fprintf(f, "v2 %.2f %.2f %.4f %.4f %.2f %.1f %.0f\n// the game's key light (towards it): its azimuth's swing (centre, half: deg), the phases its sun "
-                       "comes on and goes off (0: its dawn turn), its noon height (deg), a game day (s), its way by day (1: azimuth down) (learned; NFSLight 1.31)\n",
+                       "comes on and goes off (0: its dawn turn), its noon height (deg), a game day (s), its way by day (1: azimuth down) (learned; NewLook 1.31)\n",
                     g_sp.c, g_sp.r, g_sp.on, g_sp.off, g_sp.M, 1 / g_sp.rate, g_sp.k);
             fclose(f);
         }

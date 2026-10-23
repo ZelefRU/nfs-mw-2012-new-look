@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------- lamps tied to breakable props
-// Found with the object tools (NFSLight_objects.log, two lamp posts): a breakable prop's runtime instance in the
+// Found with the object tools (NewLook_objects.log, two lamp posts): a breakable prop's runtime instance in the
 // game's memory, around the address A of its position:
 //   A-48, A-32, A-16  its axes (rows of its world matrix, w = 1), A+0 position, A+12 = 1.0
 //   A+16 .. A+44      velocity and spin, all 0 while it stands

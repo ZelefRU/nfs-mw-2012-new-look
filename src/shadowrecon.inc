@@ -153,11 +153,11 @@ static void VsDumpCode(ID3D11VertexShader* vs, const char* title)
         ID3DBlob* b = 0;
         if (!dis || FAILED(dis(g_vsCode[i].code, g_vsCode[i].size, 0, 0, &b)) || !b) return;
         char p[MAX_PATH];
-        sprintf(p, "%sNFSLight_sky.txt", g_dir);
+        sprintf(p, "%sNewLook_sky.txt", g_dir);
         FILE* f = fopen(p, "a");
         if (f) { fprintf(f, "==== %s  vs %p\n", title, vs); fwrite(b->GetBufferPointer(), 1, b->GetBufferSize() - 1, f); fprintf(f, "\n"); fclose(f); }
         b->Release();
-        Log("sky: %s %p disassembled into NFSLight_sky.txt", title, vs);
+        Log("sky: %s %p disassembled into NewLook_sky.txt", title, vs);
         return;
     }
     Log("sky: %s %p: code not kept", title, vs);

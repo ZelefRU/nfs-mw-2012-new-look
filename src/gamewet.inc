@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------- the game's own wetness (GameWetness)
-// The game's road / pavement / ground shaders (NFSLight_wet.txt) read a "puddleMapSampler": rgb a tint, alpha where and
+// The game's road / pavement / ground shaders (NewLook_wet.txt) read a "puddleMapSampler": rgb a tint, alpha where and
 // how wet (times a per-vertex wetness): it darkens the albedo, flattens the normal, raises the gloss and mixes in the
 // planar reflection (scaled by the same amount). It is wet everywhere the map says, under roofs too.
 // GameWetness (param 110): 1 = the game's; 0 = a plain map (alpha 0: dry); between: a copy of the game's map with its

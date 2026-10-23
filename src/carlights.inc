@@ -67,7 +67,7 @@ static void CarVsDump(const void* code, SIZE_T size)
     ID3DBlob* b = 0;
     if (!dis || FAILED(dis(code, size, 0, 0, &b)) || !b) return;
     char p[MAX_PATH];
-    sprintf(p, "%sNFSLight_carvs.txt", g_dir);
+    sprintf(p, "%sNewLook_carvs.txt", g_dir);
     FILE* f = fopen(p, n ? "a" : "w");
     if (f) { fprintf(f, "==== traffic vertex shader %d\n", n); fwrite(b->GetBufferPointer(), 1, b->GetBufferSize() - 1, f); fclose(f); }
     b->Release();
@@ -475,7 +475,7 @@ static int CarLights(int c, float (*pos)[4], float (*col)[4], float (*dir)[4], f
 
 // ---- per model corrections of the light places (menu: CAR LIGHTS, "aimed car" items). A model is known by its
 // size (length / width / height, within 12 cm: the far version of a model is a little different). Saved in
-// NFSLight_carlights.txt: L W H, then headlights out / up / forward, tail lights out / up / back (m).
+// NewLook_carlights.txt: L W H, then headlights out / up / forward, tail lights out / up / back (m).
 struct CarFix { float L, W, H, o[6]; };
 static CarFix g_fix[256];
 static int g_fixN = -1;
@@ -486,7 +486,7 @@ static void CarFixLoad()
 {
     g_fixN = 0;
     char p[MAX_PATH];
-    sprintf(p, "%sNFSLight_carlights.txt", g_dir);
+    sprintf(p, "%sNewLook_carlights.txt", g_dir);
     FILE* f = fopen(p, "r");
     if (!f) return;
     char line[256];
@@ -499,10 +499,10 @@ static void CarFixLoad()
 static void CarFixSave()
 {
     char p[MAX_PATH];
-    sprintf(p, "%sNFSLight_carlights.txt", g_dir);
+    sprintf(p, "%sNewLook_carlights.txt", g_dir);
     FILE* f = fopen(p, "w");
     if (!f) return;
-    fprintf(f, "# NFSLight: traffic light places per car model. length width height (m) | headlights out up forward | tail lights out up back\n");
+    fprintf(f, "# NewLook: traffic light places per car model. length width height (m) | headlights out up forward | tail lights out up back\n");
     for (int i = 0; i < g_fixN; ++i) {
         const CarFix& F = g_fix[i];
         fprintf(f, "%.2f %.2f %.2f   %.2f %.2f %.2f   %.2f %.2f %.2f\n", F.L, F.W, F.H, F.o[0], F.o[1], F.o[2], F.o[3], F.o[4], F.o[5]);

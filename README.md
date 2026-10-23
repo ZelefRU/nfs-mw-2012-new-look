@@ -1,4 +1,4 @@
-# NFSLight
+# NewLook
 
 by **Zelef** · https://github.com/ZelefRU/nfs-mw-2012-new-look
 
@@ -8,7 +8,7 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 
 [Русская версия](README.ru.md) · [Changelog](CHANGELOG.md) · [Known issues / TODO](TODO.md) · [Dev log](docs/DEVLOG.md)
 
-> Version **1.63**. Work in progress: it runs and looks good on the author's PC; expect rough edges (see
+> Version **1.64** (formerly **NFSLight**). Work in progress: it runs and looks good on the author's PC; expect rough edges (see
 > [Known issues](#known-issues)).
 
 ## Features
@@ -45,7 +45,7 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 - Parallax on roads, pavements and building walls (heights made from the normal maps), texture replacement.
 
 **Tools**
-- An in-game menu (every setting live, saved to `NFSLight.ini`) and 30+ debug views (shadow cascades, AO, reflections,
+- An in-game menu (every setting live, saved to `NewLook.ini`) and 30+ debug views (shadow cascades, AO, reflections,
   wetness, ...).
 - A built-in benchmark (per-effect GPU cost, also at stored viewpoints).
 - **World editor** (Ctrl+J): hide, move, turn, scale and copy the game's own objects; props can be baked into the
@@ -65,17 +65,21 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 2. Start the game. The first start compiles the shaders in the background (~10 s, during loading).
 3. **P** shows / hides the menu, **Y** switches the mod on / off (to compare with the original).
 
-Uninstall: delete `scripts\NFSLight*` (and `dinput8.dll` if nothing else uses it).
+Updating from NFSLight (1.63 or older): copy the new files. At its first start NewLook renames your settings, lamp
+map and edits (`scripts\NFSLight*`) to `NewLook*`. If the old `NFSLight.asi` is still there, it is renamed `.old` and
+this start does nothing: restart the game once.
+
+Uninstall: delete `scripts\NewLook*` (and `dinput8.dll` if nothing else uses it).
 
 ### With ReShade
-Install ReShade for "DirectX 10/11/12" (it takes `dxgi.dll`); do not give it the name `dinput8.dll`. NFSLight hooks
+Install ReShade for "DirectX 10/11/12" (it takes `dxgi.dll`); do not give it the name `dinput8.dll`. NewLook hooks
 the real system D3D11 / DXGI, not ReShade's proxy.
 
 ## Keys
 | Key | |
 |---|---|
 | Y | mod on / off |
-| P / Shift+P | menu show / hide / reload the shaders (`NFSLight.hlsl`) |
+| P / Shift+P | menu show / hide / reload the shaders (`NewLook.hlsl`) |
 | I / O, Shift+I / O | select a setting / a group |
 | K / L | change the value; J: back to default; H: save all |
 | U | the list of debug views (I / O choose) |
@@ -83,21 +87,21 @@ the real system D3D11 / DXGI, not ReShade's proxy.
 | Ctrl+J | world editor (Ctrl+D copy, Del delete, Ctrl+Z / Ctrl+Y undo / redo) |
 
 ## Files (in `scripts`)
-- `NFSLight.asi`, `NFSLight.hlsl`: the mod and its shaders (the HLSL is compiled at run time; edit and Shift+P).
-- `NFSLight.ini`: the settings.
-- `NFSLight_lamps.txt`, `_zones`, `_lamp_presets`, `_lamp_templates`: the lamp map and zones.
-- `NFSLight_carlights.txt`: light positions for traffic car models.
-- Written by the mod: `NFSLight.log` (send it with a bug report), `NFSLight_cache\` (compiled shaders),
-  `NFSLight_world.txt` (world editor edits).
+- `NewLook.asi`, `NewLook.hlsl`: the mod and its shaders (the HLSL is compiled at run time; edit and Shift+P).
+- `NewLook.ini`: the settings.
+- `NewLook_lamps.txt`, `_zones`, `_lamp_presets`, `_lamp_templates`: the lamp map and zones.
+- `NewLook_carlights.txt`: light positions for traffic car models.
+- Written by the mod: `NewLook.log` (send it with a bug report), `NewLook_cache\` (compiled shaders),
+  `NewLook_world.txt` (world editor edits).
 
 ## Known issues
 See [TODO.md](TODO.md). The main ones: far buildings' shadows can still pop or come in ragged where the shadow
 cascades meet; a thin bright outline round cars in some light; trails on fast traffic cars; night cost with many lamps.
 
 ## Building from source
-- Visual Studio 2022 Build Tools (x86, C++). `src\build.bat` builds `build\NFSLight.asi` (one translation unit:
-  `nfslight.cpp` includes the `*.inc` files).
-- `src\NFSLight.hlsl` goes next to the ASI; it is compiled at run time with `d3dcompiler_47.dll`.
+- Visual Studio 2022 Build Tools (x86, C++). `src\build.bat` builds `build\NewLook.asi` (one translation unit:
+  `newlook.cpp` includes the `*.inc` files).
+- `src\NewLook.hlsl` goes next to the ASI; it is compiled at run time with `d3dcompiler_47.dll`.
 - `worldtools\` are Python 3 scripts (no extra packages) for the game's Bundle 2 track files.
 
 ## How it works (short)

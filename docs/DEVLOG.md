@@ -1,3 +1,5 @@
+> NewLook was called NFSLight up to 1.63: this log keeps the old name.
+
 # NFSLight — mod log
 
 Game: Need for Speed: Most Wanted (2012), Steam 1262560, NFS13.exe 1.5.0.0 (x86, LAA), Criterion Chameleon.
@@ -1793,3 +1795,28 @@ Waiting for the user's screenshots of the current glitches.
   (past it: lit), no dithered band, no next map for the search / penumbra, no far-caster check, no city map. Each map
   still holds what the game drew for its shadows (its cascade's casters): the view shows which map lacks a building.
 - Harnesses: shadowtest2, taatest pass (shaders compile).
+
+## Release 1.63 packaged (2026-10-24)
+- Version labels 1.63 (cpp header, log line, menu title was still "1.24b"); rebuilt, installed. addprops.py: the
+  HAWAII path from its own folder (no absolute path).
+- TODO.md: one list (open now / waiting for a decision / world editing / the older polish list); the dawn reflections
+  and under-car fix (1.62) confirmed by the user, taken out.
+- _NFSLight/publish/: github/NFSLight (README EN + RU, LICENSE MIT, CHANGELOG from the headings, TODO, docs/DEVLOG =
+  this log without the backup paths, src without backups, worldtools scripts only, .gitignore), release/NFSLight_1.63
+  (+ zip, forward-slash paths: dinput8.dll = Ultimate ASI Loader + its note, scripts: asi, hlsl, ini, lamps, zones,
+  presets, templates, carlights; README EN/RU), nexus/ (BBCode EN / RU, summary), DEMO_PLAN.md (RU: what to shoot).
+  um publish check: PASS on both (against an empty folder: against the game folder our own installed files read as
+  "game files").
+
+## 1.64 (2026-10-24): renamed NFSLight -> NewLook
+- User: rename NFSLight to NewLook everywhere. Sources (strings, comments, file names: NewLook.asi / NewLook.hlsl /
+  NewLook.ini [NewLook] / NewLook_*.txt / NewLook_cache / NewLook.log), worldtools (bake.py reads
+  scripts/NewLook_world.txt), docs, the repo, the release. The dev folder _NFSLight and its backups keep the old name.
+- MigrateOldNames (DllMain, before the ini is read): scripts\NFSLight* -> NewLook* (files and folders; not .hlsl,
+  .log, _cache; never over an existing NewLook one), the ini's [NFSLight] -> [NewLook]. An old NFSLight.asi beside it
+  (both would hook the game): renamed NFSLight.asi.old, this start does nothing (logged), the next is NewLook's.
+  Harness migtest: all pass. Export NewLook_MouseCaptured + the old NFSLight_MouseCaptured.
+- DroneCam (version.dll, rebuilt): looks for NewLook.asi / NewLook_MouseCaptured, then the old names (its backups:
+  _DroneCam/dronecam_before_newlook.cpp.bak, version_before_newlook.dll.bak).
+- Installed when the game closed: NewLook.asi + .hlsl, version.dll; scripts\NFSLight.asi / .hlsl / _cache removed
+  (the asi kept as _NFSLight/NFSLight_v163.asi.bak); the data files are renamed by the mod at its first start.

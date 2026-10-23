@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------- object tools
 // What did the game draw under the cross, and where does that object live in the game's memory? Research
-// tools for tying a lamp to a breakable prop (a lamp post). Everything goes to NFSLight_objects.log.
+// tools for tying a lamp to a breakable prop (a lamp post). Everything goes to NewLook_objects.log.
 //  1 pick: for one frame every main-view geometry draw before the lighting is drawn once more into the one
 //    pixel under the cross (depth EQUAL, no writes) inside an occlusion query: the last one that passes is
 //    what is seen there.
@@ -16,7 +16,7 @@ static CRITICAL_SECTION g_objLogLock;
 static void OLog(const char* fmt, ...)
 {
     static bool init;
-    if (!init) { init = true; InitializeCriticalSection(&g_objLogLock); sprintf(g_objLogPath, "%sNFSLight_objects.log", g_dir); }
+    if (!init) { init = true; InitializeCriticalSection(&g_objLogLock); sprintf(g_objLogPath, "%sNewLook_objects.log", g_dir); }
     char buf[2048];
     va_list ap;
     va_start(ap, fmt);
@@ -606,7 +606,7 @@ static void ObPresent(ID3D11DeviceContext* ctx)
             }
         } else {
             OLog("constants: no position near the clicked point found (see the dump above)");
-            strcpy(g_obStatus, "constants dumped, no position found (see NFSLight_objects.log)");
+            strcpy(g_obStatus, "constants dumped, no position found (see NewLook_objects.log)");
         }
         g_obPhase = OB_IDLE;
         return;
@@ -621,7 +621,7 @@ static void ObPresent(ID3D11DeviceContext* ctx)
         LONG left = (LONG)(g_obWatchEnd - GetTickCount());
         sprintf(g_obStatus, "watching: %ld hits, %ld s left - knock the object down", g_obHitCount, left > 0 ? left / 1000 : 0);
     }
-    if (ph == OB_WATCH && !g_obScanBusy) { g_obPhase = OB_IDLE; sprintf(g_obStatus, "done - send NFSLight_objects.log"); }
+    if (ph == OB_WATCH && !g_obScanBusy) { g_obPhase = OB_IDLE; sprintf(g_obStatus, "done - send NewLook_objects.log"); }
     if (g_obPhase == OB_WATCH && !g_obScanDone) sprintf(g_obStatus, "scanning memory %ld %%", g_obScanPct);
 }
 

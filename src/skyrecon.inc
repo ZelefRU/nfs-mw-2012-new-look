@@ -2,7 +2,7 @@
 // The sky is drawn first in the lighting run, by a pixel shader with 4 cloud textures (BaseCloudSampler..4) and a
 // cloud colour (BaseCloudColour). To learn how it works and what it is fed:
 // - every sky-like pixel shader (cloud / sky / moon / star in its names) is disassembled once, when the game makes
-//   it, into scripts\NFSLight_sky.txt (its constant buffers with their layout, its textures, its code);
+//   it, into scripts\NewLook_sky.txt (its constant buffers with their layout, its textures, its code);
 // - on Shift+T, the main-view draws of the frame are listed by pixel shader (sky: lines), and the first draw of each
 //   sky shader logs every constant it reads (name = values, from the buffers bound) and its textures' sizes.
 
@@ -38,15 +38,15 @@ static void SkyNote(const void* code, SIZE_T size, ID3D11PixelShader* ps, const 
     ID3DBlob* b = 0;
     if (!dis || FAILED(dis(code, size, 0, 0, &b)) || !b) return;
     char p[MAX_PATH];
-    sprintf(p, "%sNFSLight_sky.txt", g_dir);
+    sprintf(p, "%sNewLook_sky.txt", g_dir);
     FILE* f = fopen(p, k ? "a" : "w");
     if (f) { fprintf(f, "==== sky shader %ld  ps %p  [%s]\n", k, ps, name); fwrite(b->GetBufferPointer(), 1, b->GetBufferSize() - 1, f); fprintf(f, "\n"); fclose(f); }
     b->Release();
-    Log("sky shader %ld: ps %p [%s] (code in NFSLight_sky.txt)", k, ps, name);
+    Log("sky shader %ld: ps %p [%s] (code in NewLook_sky.txt)", k, ps, name);
 }
 
 // the game's own wetness: pixel shaders with a constant named wet / rain / puddle / driveable are disassembled once
-// into scripts\NFSLight_wet.txt (to find what makes its roads wet everywhere)
+// into scripts\NewLook_wet.txt (to find what makes its roads wet everywhere)
 static void WetNote(const void* code, SIZE_T size, ID3D11PixelShader* ps, const char* name)
 {
     static int n;
@@ -81,7 +81,7 @@ static void WetNote(const void* code, SIZE_T size, ID3D11PixelShader* ps, const 
     ID3DBlob* b = 0;
     if (!dis || FAILED(dis(code, size, 0, 0, &b)) || !b) return;
     char p[MAX_PATH];
-    sprintf(p, "%sNFSLight_wet.txt", g_dir);
+    sprintf(p, "%sNewLook_wet.txt", g_dir);
     FILE* f = fopen(p, n ? "a" : "w");
     if (f) { fprintf(f, "==== wet shader %d  ps %p  [%s]  constants: %s\n", n, ps, name, hit); fwrite(b->GetBufferPointer(), 1, b->GetBufferSize() - 1, f); fprintf(f, "\n"); fclose(f); }
     b->Release();

@@ -1,15 +1,15 @@
-// NFSLight 1.63 - better sun shadows, AO, bounce light and air for Need for Speed: Most Wanted (2012).
+// NewLook 1.64 - better sun shadows, AO, bounce light and air for Need for Speed: Most Wanted (2012).
 //
 // An ASI plugin (loaded by the ASI loader of HD Effects, dinput8.dll), separate from DroneCam.
 // It hooks D3D11 through the vtables of a throw-away device: CreatePixelShader recognises the
 // game's deferred sun-pass shaders (by their reflection names), and right after every sun-pass
-// draw we copy the render target and draw once more with our own pixel shader (NFSLight.hlsl),
+// draw we copy the render target and draw once more with our own pixel shader (NewLook.hlsl),
 // which takes the game's sun light out again and puts it back with better shadows.
 //
 // Timing: the overlay shows FPS and the GPU time of every pass (D3D11 timestamp queries).
 //
 // Keys: Y on/off, U view (normal / split / masks), I/O select, K/L change, J reset,
-//       H save, P overlay on/off, Shift+P reload NFSLight.hlsl and NFSLight.ini.
+//       H save, P overlay on/off, Shift+P reload NewLook.hlsl and NewLook.ini.
 
 #include <windows.h>
 #include <d3d11.h>
@@ -284,17 +284,17 @@ static LampClip g_clip;
 static void LoadIni()
 {
     char b[64];
-    GetPrivateProfileStringA("NFSLight", "NewLamp", "", b, sizeof(b), g_iniPath);
+    GetPrivateProfileStringA("NewLook", "NewLamp", "", b, sizeof(b), g_iniPath);
     g_newLamp.valid = sscanf(b, "%f %f %f %d", &g_newLamp.c[0], &g_newLamp.c[1], &g_newLamp.c[2], &g_newLamp.group) == 4;
-    g_enabled = GetPrivateProfileIntA("NFSLight", "Enabled", 1, g_iniPath) != 0;
-    g_overlay = GetPrivateProfileIntA("NFSLight", "ShowOverlay", 1, g_iniPath) != 0;
-    g_halfRes = GetPrivateProfileIntA("NFSLight", "HalfResEffects", 1, g_iniPath) != 0;
-    g_view = GetPrivateProfileIntA("NFSLight", "View", 0, g_iniPath);
+    g_enabled = GetPrivateProfileIntA("NewLook", "Enabled", 1, g_iniPath) != 0;
+    g_overlay = GetPrivateProfileIntA("NewLook", "ShowOverlay", 1, g_iniPath) != 0;
+    g_halfRes = GetPrivateProfileIntA("NewLook", "HalfResEffects", 1, g_iniPath) != 0;
+    g_view = GetPrivateProfileIntA("NewLook", "View", 0, g_iniPath);
     if (g_view < 0 || g_view >= kViewCount) g_view = 0;
     for (int i = 0; i < kParams; ++i) {
         char def[32];
         sprintf(def, "%g", g_p[i].def);
-        GetPrivateProfileStringA("NFSLight", g_p[i].key, def, b, sizeof(b), g_iniPath);
+        GetPrivateProfileStringA("NewLook", g_p[i].key, def, b, sizeof(b), g_iniPath);
         float v = (float)atof(b);
         g_p[i].v = v < g_p[i].mn ? g_p[i].mn : v > g_p[i].mx ? g_p[i].mx : v;
     }
@@ -312,7 +312,7 @@ static void PresetMemLoad() {
     for (int s = 0; s < 2; ++s) {
         PresetMemory& m = g_presetMem[s];
         char b[512];
-        GetPrivateProfileStringA("NFSLight", m.key, "", b, sizeof(b), g_iniPath);
+        GetPrivateProfileStringA("NewLook", m.key, "", b, sizeof(b), g_iniPath);
         char* p = b;
         int i = 0;
         for (; i < m.n; ++i) { char* e; float v = strtof(p, &e); if (e == p) break; m.saved[i] = v; p = e; }
@@ -341,13 +341,13 @@ static const char* PresetMemChanged(int idx, float before)   // a message, or 0
 static void SaveIni()
 {
     char b[64];
-    WritePrivateProfileStringA("NFSLight", "Enabled", g_enabled ? "1" : "0", g_iniPath);
-    WritePrivateProfileStringA("NFSLight", "ShowOverlay", g_overlay ? "1" : "0", g_iniPath);
+    WritePrivateProfileStringA("NewLook", "Enabled", g_enabled ? "1" : "0", g_iniPath);
+    WritePrivateProfileStringA("NewLook", "ShowOverlay", g_overlay ? "1" : "0", g_iniPath);
     sprintf(b, "%d", g_view);
-    WritePrivateProfileStringA("NFSLight", "View", b, g_iniPath);
+    WritePrivateProfileStringA("NewLook", "View", b, g_iniPath);
     for (int i = 0; i < kParams; ++i) {
         sprintf(b, "%.3f", g_p[i].v);
-        WritePrivateProfileStringA("NFSLight", g_p[i].key, b, g_iniPath);
+        WritePrivateProfileStringA("NewLook", g_p[i].key, b, g_iniPath);
     }
     for (int s = 0; s < 2; ++s) {
         PresetMemory& m = g_presetMem[s];
@@ -355,11 +355,11 @@ static void SaveIni()
         if (!m.has) continue;
         char lb[512] = "";
         for (int i = 0; i < m.n; ++i) { char t[24]; sprintf(t, "%s%.3f", i ? " " : "", m.saved[i]); strcat(lb, t); }
-        WritePrivateProfileStringA("NFSLight", m.key, lb, g_iniPath);
+        WritePrivateProfileStringA("NewLook", m.key, lb, g_iniPath);
     }
     if (g_newLamp.valid) {
         sprintf(b, "%.4f %.4f %.4f %d", g_newLamp.c[0], g_newLamp.c[1], g_newLamp.c[2], g_newLamp.group);
-        WritePrivateProfileStringA("NFSLight", "NewLamp", b, g_iniPath);
+        WritePrivateProfileStringA("NewLook", "NewLamp", b, g_iniPath);
     }
     Log("settings saved");
 }
@@ -372,7 +372,7 @@ typedef HRESULT(WINAPI* D3DReflectFn)(LPCVOID, SIZE_T, REFIID, void**);
 static D3DCompileFn g_compile;
 static D3DReflectFn g_reflect;
 
-// 1.59: compiled shaders kept on disk (scripts\NFSLight_cache\<key>.cso, the key: the source, entry, target, defines,
+// 1.59: compiled shaders kept on disk (scripts\NewLook_cache\<key>.cso, the key: the source, entry, target, defines,
 // flags): the first switch-on compiled the 28 shaders of the 150 KB source one after another (~25 s, the game stood
 // still); now they come from the cache, are compiled in the background from the game's start, several at once
 typedef HRESULT(WINAPI* D3DCreateBlobFn)(SIZE_T, ID3DBlob**);
@@ -457,7 +457,7 @@ static bool LoadCompiler()
     g_reflect = (D3DReflectFn)GetProcAddress(m, "D3DReflect");
     g_createBlob = (D3DCreateBlobFn)GetProcAddress(m, "D3DCreateBlob");
     if (!g_compileReal || !g_reflect) return false;
-    sprintf(g_cacheDir, "%sNFSLight_cache\\", g_dir);
+    sprintf(g_cacheDir, "%sNewLook_cache\\", g_dir);
     if (!CreateDirectoryA(g_cacheDir, 0) && GetLastError() != ERROR_ALREADY_EXISTS) g_cacheDir[0] = 0;
     if (g_cacheDir[0]) CacheTidy();
     g_compile = CachedCompile;
@@ -1075,9 +1075,9 @@ static void LampsReadBack(ID3D11DeviceContext* ctx, unsigned frame)
     }
 }
 
-// ---- lamp map: lamps kept for good (NFSLight_lamps.txt), placed by hand or learnt from the found ones
+// ---- lamp map: lamps kept for good (NewLook_lamps.txt), placed by hand or learnt from the found ones
 // ---- lamp groups: every map lamp is "custom" (its own colour / power, editable) or belongs to a group with a
-// fixed colour and power (NFSLight_lamp_presets.txt: name hue saturation power; edit the file, Shift+P reloads).
+// fixed colour and power (NewLook_lamp_presets.txt: name hue saturation power; edit the file, Shift+P reloads).
 struct Preset { char name[32]; float hue, sat, power, on, radius, reach, glow; };   // (1.39: on, own light radius / reach (0: the Lamps'), glow in the air)
 static Preset g_presets[32];
 static int g_presetCount;
@@ -1113,8 +1113,8 @@ static void PresetsSave()
 {
     FILE* f = fopen(g_presetPath, "w");
     if (!f) return;
-    fprintf(f, "# NFSLight lamp groups: name hue(0-360) saturation(0-1) power [on(1/0) radius(m, 0 = the Lamps') reach(m, 0 = the\n"
-               "# Lamps') glow(1/0)]. The order is the group number in NFSLight_lamps.txt (7th number, -1 = custom), so add new\n"
+    fprintf(f, "# NewLook lamp groups: name hue(0-360) saturation(0-1) power [on(1/0) radius(m, 0 = the Lamps') reach(m, 0 = the\n"
+               "# Lamps') glow(1/0)]. The order is the group number in NewLook_lamps.txt (7th number, -1 = custom), so add new\n"
                "# groups at the end. Edited in the menu (LAMP GROUPS) or here (Shift+P reloads).\n");
     for (int i = 0; i < g_presetCount; ++i)
         fprintf(f, "%s %.0f %.2f %.2f %.0f %.1f %.0f %.0f\n", g_presets[i].name, g_presets[i].hue, g_presets[i].sat, g_presets[i].power,
@@ -1193,8 +1193,8 @@ static void MapSave()
 {
     FILE* f = fopen(g_mapPath, "w");
     if (!f) { Log("lamp map: cannot write %s", g_mapPath); return; }
-    fprintf(f, "# NFSLight lamp map: x y z (world, m)  r g b (own colour x power)  group (-1 = custom, else a line of\n"
-               "# NFSLight_lamp_presets.txt counting from 0)  [object x y z (0 0 0 = none)  zone channel].\n"
+    fprintf(f, "# NewLook lamp map: x y z (world, m)  r g b (own colour x power)  group (-1 = custom, else a line of\n"
+               "# NewLook_lamp_presets.txt counting from 0)  [object x y z (0 0 0 = none)  zone channel].\n"
                "# Edit freely; lines starting with # are ignored.\n");
     for (int i = 0; i < g_mapCount; ++i)
     {
@@ -1250,7 +1250,7 @@ static void SelLoad();
 static int g_lampSel = -1, g_dragAxis;
 
 // ---- light zones: boxes around tunnels, garages, underpasses. Light from outside a zone does not get in and light
-// from inside does not get out (soft 1 m edge). NFSLight_zones.txt: centre x y z, half sizes x y z, turn (degrees).
+// from inside does not get out (soft 1 m edge). NewLook_zones.txt: centre x y z, half sizes x y z, turn (degrees).
 // soft: width of the edge where the light fades (m); channel: 0 = cuts every lamp, N = only the lamps of channel N
 struct Zone { float c[3], h[3], yaw, soft; int channel; };
 static Zone g_zone[512];
@@ -1263,7 +1263,7 @@ static void ZoneSave()
 {
     FILE* f = fopen(g_zonePath, "w");
     if (!f) return;
-    fprintf(f, "# NFSLight light zones: centre x y z, half size x y z (m), turn about the vertical (degrees), soft edge (m),\n"
+    fprintf(f, "# NewLook light zones: centre x y z, half size x y z (m), turn about the vertical (degrees), soft edge (m),\n"
                "# channel (0 = cuts every lamp, N = only the lamps of channel N)\n");
     for (int i = 0; i < g_zoneCount; ++i)
         fprintf(f, "%.3f %.3f %.3f %.3f %.3f %.3f %.2f %.2f %d\n", g_zone[i].c[0], g_zone[i].c[1], g_zone[i].c[2], g_zone[i].h[0], g_zone[i].h[1],
@@ -1445,7 +1445,8 @@ static float g_ptrX, g_ptrY;   // pointer in client pixels while dragging
 static float g_clientW, g_clientH;
 
 // DroneCam's free camera asks this: while 1 the mouse belongs to the lamp editor (no camera turning).
-extern "C" __declspec(dllexport) int __cdecl NFSLight_MouseCaptured() { return g_dragAxis != 0 || g_weDrag != 0; }
+extern "C" __declspec(dllexport) int __cdecl NewLook_MouseCaptured() { return g_dragAxis != 0 || g_weDrag != 0; }
+extern "C" __declspec(dllexport) int __cdecl NFSLight_MouseCaptured() { return g_dragAxis != 0 || g_weDrag != 0; }   // (the name before 1.64: older DroneCam)
 static float g_selHue, g_selSat, g_selPow;
 static int g_selPreset = -1;   // group of the selected lamp, -1 = custom
 static const char* kLampProps[] = { "group", "hue", "saturation", "power", "zone channel" };
@@ -1998,10 +1999,10 @@ static DWORD WINAPI ShWorker(LPVOID p)
         int nm = 0;
         if (kShList[k].depth) { mac[nm].Name = "WRITE_DEPTH"; mac[nm++].Definition = "1"; }
         if (kShList[k].blend) { mac[nm].Name = "BLEND_OUT"; mac[nm++].Definition = "1"; }
-        j->hr[k] = g_compile(j->src, j->n, "NFSLight.hlsl", mac, 0, kShList[k].entry, kShList[k].target, D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &j->code[k], &j->err[k]);
+        j->hr[k] = g_compile(j->src, j->n, "NewLook.hlsl", mac, 0, kShList[k].entry, kShList[k].target, D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &j->code[k], &j->err[k]);
     }
 }
-// the source (our clouds' common part + NFSLight.hlsl) compiled into j's blobs; false: no file
+// the source (our clouds' common part + NewLook.hlsl) compiled into j's blobs; false: no file
 static bool ShCompileAll(ShJob* j)
 {
     memset(j, 0, sizeof(*j));
@@ -2069,7 +2070,7 @@ static bool CompileShaders(ID3D11Device* dev)
     }
     LONG h0 = g_cacheHits, m0 = g_cacheMisses;
     static ShJob j;
-    if (!ShCompileAll(&j)) { sprintf(g_compileError, "NFSLight.hlsl not found"); Log("%s", g_compileError); return false; }
+    if (!ShCompileAll(&j)) { sprintf(g_compileError, "NewLook.hlsl not found"); Log("%s", g_compileError); return false; }
     ID3D11DeviceChild* made[28] = {};
     bool ok = true;
     for (int k = 0; k < 28 && ok; ++k) {
@@ -2087,7 +2088,7 @@ static bool CompileShaders(ID3D11Device* dev)
         }
     }
     ShRelease(&j);
-    Log("NFSLight.hlsl: %lu ms (%ld from the cache, %ld compiled)", GetTickCount() - t0, g_cacheHits - h0, g_cacheMisses - m0);
+    Log("NewLook.hlsl: %lu ms (%ld from the cache, %ld compiled)", GetTickCount() - t0, g_cacheHits - h0, g_cacheMisses - m0);
     if (!ok) {
         for (int k = 0; k < 28; ++k) if (made[k]) made[k]->Release();
         return false;
@@ -2103,7 +2104,7 @@ static bool CompileShaders(ID3D11Device* dev)
                                    (ID3D11DeviceChild**)&g_psPano, (ID3D11DeviceChild**)&g_psCity };
     for (int k = 0; k < 28; ++k) { if (*dst[k]) (*dst[k])->Release(); *dst[k] = made[k]; }
     g_compileError[0] = 0;
-    Log("NFSLight.hlsl compiled");
+    Log("NewLook.hlsl compiled");
     return true;
 }
 
@@ -2305,7 +2306,7 @@ static void SunPass(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& dc)
 
 // ---------------------------------------------------------------- capture (Shift+U)
 // Renders our shader in several debug modes into a small float target and saves PNGs next to
-// the plugin (NFSLight_capture\), so the buffers can be looked at outside the game.
+// the plugin (NewLook_capture\), so the buffers can be looked at outside the game.
 
 static unsigned Crc32(const unsigned char* p, size_t n, unsigned c = 0xffffffff)
 {
@@ -2368,7 +2369,7 @@ static void Capture(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& dc, Li
 {
     const int W = 1280, H = 720;
     char dir[MAX_PATH];
-    sprintf(dir, "%sNFSLight_capture", g_dir);
+    sprintf(dir, "%sNewLook_capture", g_dir);
     CreateDirectoryA(dir, 0);
     D3D11_TEXTURE2D_DESC td = {};
     td.Width = W; td.Height = H; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -3365,7 +3366,7 @@ static HRESULT STDMETHODCALLTYPE HkCreatePS(ID3D11Device* dev, const void* code,
 {
     HRESULT hr = oCreatePS(dev, code, size, cl, out);
     static bool tried;
-    if (!tried) { tried = true; if (!LoadCompiler()) Log("no shader compiler: NFSLight stays off"); }
+    if (!tried) { tried = true; if (!LoadCompiler()) Log("no shader compiler: NewLook stays off"); }
     if (SUCCEEDED(hr) && out && *out && code && g_reflect) { ExamineShader(code, size, *out); NameShader(code, size, *out); TxNotePs(code, size, *out); CoronaNote(code, size, *out); }
     if (SUCCEEDED(hr) && out && *out && code) FlareNote(code, size, *out, false);   // the game's sun flare (sunshadow.inc)
     if (SUCCEEDED(hr) && out && *out && code) { MatNotePs(code, size, *out); BldNotePs(code, size, *out); }
@@ -3948,7 +3949,7 @@ static void Keys()
     if (!OurWindowActive()) return;
     bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     bool changed = false;
-    if (!(GetAsyncKeyState(VK_CONTROL) & 0x8000) && Pressed('Y', false)) { g_enabled = !g_enabled; changed = true; Log("NFSLight %s", g_enabled ? "on" : "off"); }
+    if (!(GetAsyncKeyState(VK_CONTROL) & 0x8000) && Pressed('Y', false)) { g_enabled = !g_enabled; changed = true; Log("NewLook %s", g_enabled ? "on" : "off"); }
     if (shift && g_view != 24 && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && Pressed('B', false)) { BptAdd(); changed = true; }   // a bench viewpoint (bench.inc)
     if (!shift && Pressed('B', false)) {   // bench: B the selected setting, Ctrl+B every effect (at every viewpoint), B again stops
         if (g_benchPhase >= 0) BenchStop();
@@ -4486,6 +4487,57 @@ static void InstallHooks()
     Log("waiting for the game to create its D3D11 device");
 }
 
+// 1.64: the mod was NFSLight before: its files in scripts\ (settings, lamp map, zones, world edits, cache ...) renamed
+// NFSLight* -> NewLook* (not over a NewLook one already there), the ini's section [NFSLight] -> [NewLook]. An old
+// NFSLight.asi still beside us would hook the same game twice: it is renamed .old and this start does nothing (the old
+// one may already be running with those files); the next start is ours alone.
+static bool MigrateOldNames()
+{
+    char p[MAX_PATH], q[MAX_PATH];
+    sprintf(p, "%sNFSLight.asi", g_dir);
+    if (GetFileAttributesA(p) != INVALID_FILE_ATTRIBUTES) {
+        sprintf(q, "%sNFSLight.asi.old", g_dir);
+        DeleteFileA(q);
+        MoveFileA(p, q);
+        return false;
+    }
+    sprintf(p, "%sNFSLight*", g_dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE fh = FindFirstFileA(p, &fd);
+    if (fh == INVALID_HANDLE_VALUE) return true;
+    static char names[64][MAX_PATH];
+    int n = 0;
+    do if (n < 64 && strncmp(fd.cFileName, "NFSLight", 8) == 0) strcpy(names[n++], fd.cFileName); while (FindNextFileA(fh, &fd));
+    FindClose(fh);
+    for (int k = 0; k < n; ++k) {
+        const char* rest = names[k] + 8;
+        if (!_stricmp(rest, ".hlsl") || !_stricmp(rest, ".log") || !_stricmp(rest, "_cache") || !_stricmp(rest, ".asi.old")) continue;
+        sprintf(p, "%s%s", g_dir, names[k]);
+        sprintf(q, "%sNewLook%s", g_dir, rest);
+        if (GetFileAttributesA(q) != INVALID_FILE_ATTRIBUTES || !MoveFileA(p, q)) continue;
+        if (!_stricmp(rest, ".ini")) {   // its section
+            FILE* f = fopen(q, "rb");
+            if (!f) continue;
+            fseek(f, 0, SEEK_END);
+            long sz = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            char* b = (char*)malloc(sz + 1);
+            size_t got = fread(b, 1, sz, f);
+            fclose(f);
+            b[got] = 0;
+            char* sec = strstr(b, "[NFSLight]");
+            if (sec && (f = fopen(q, "wb")) != 0) {
+                fwrite(b, 1, sec - b, f);
+                fputs("[NewLook]", f);
+                fputs(sec + 10, f);
+                fclose(f);
+            }
+            free(b);
+        }
+    }
+    return true;
+}
+
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH) {
@@ -4496,26 +4548,31 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID)
         GetModuleFileNameA(h, g_dir, MAX_PATH);
         char* s = strrchr(g_dir, '\\');
         if (s) s[1] = 0;
-        sprintf(g_logPath, "%sNFSLight.log", g_dir);
-        sprintf(g_iniPath, "%sNFSLight.ini", g_dir);
-        sprintf(g_hlslPath, "%sNFSLight.hlsl", g_dir);
+        sprintf(g_logPath, "%sNewLook.log", g_dir);
+        if (!MigrateOldNames()) {   // an old NFSLight.asi was here (now .old): nothing this start
+            DeleteFileA(g_logPath);
+            Log("NewLook 1.64: an old NFSLight.asi was in scripts (renamed NFSLight.asi.old): restart the game");
+            return TRUE;
+        }
+        sprintf(g_iniPath, "%sNewLook.ini", g_dir);
+        sprintf(g_hlslPath, "%sNewLook.hlsl", g_dir);
         DeleteFileA(g_logPath);
         LoadIni();
         PresetMemLoad();
         MenuInit();
-        sprintf(g_mapPath, "%sNFSLight_lamps.txt", g_dir);
-        sprintf(g_presetPath, "%sNFSLight_lamp_presets.txt", g_dir);
-        sprintf(g_tplPath, "%sNFSLight_lamp_templates.txt", g_dir);
-        sprintf(g_zonePath, "%sNFSLight_zones.txt", g_dir);
-        sprintf(g_wePath, "%sNFSLight_world.txt", g_dir);
-        sprintf(g_bptPath, "%sNFSLight_bench_points.txt", g_dir);
+        sprintf(g_mapPath, "%sNewLook_lamps.txt", g_dir);
+        sprintf(g_presetPath, "%sNewLook_lamp_presets.txt", g_dir);
+        sprintf(g_tplPath, "%sNewLook_lamp_templates.txt", g_dir);
+        sprintf(g_zonePath, "%sNewLook_zones.txt", g_dir);
+        sprintf(g_wePath, "%sNewLook_world.txt", g_dir);
+        sprintf(g_bptPath, "%sNewLook_bench_points.txt", g_dir);
         PresetsLoad();
         MapLoad();
         TplLoad();
         ZoneLoad();
         WeLoad();
         BptLoad();
-        Log("NFSLight 1.63 loaded");
+        Log("NewLook 1.64 loaded");
         AddVectoredExceptionHandler(0, CrashLogger);
         InstallHooks();
     }
