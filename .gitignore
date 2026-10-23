@@ -1,0 +1,13 @@
+build/
+*.obj
+*.exp
+*.lib
+*.pdb
+*.bak
+*.log
+NFSLight_cache/
+worldtools/orig/
+worldtools/export/
+*.BNDL
+*.bin
+__pycache__/

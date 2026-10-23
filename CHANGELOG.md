@@ -1,0 +1,132 @@
+# Changelog
+
+Newest first. Every entry is detailed in [docs/DEVLOG.md](docs/DEVLOG.md).
+
+- 1.63 (2026-10-20): ShadowOnly (test): one of our sun maps alone
+- 1.62 (2026-10-20, HLSL only): tail lights, under cars, dawn reflections, low-sun cascades
+- 1.61 (2026-10-19, HLSL only): far buildings' shadows where the cascades meet
+- 1.60 (2026-10-19, HLSL only): wheels, a white outline round cars, a tail light's dots
+- 1.59 (2026-10-19): no 25 s stall at the switch-on (a shader cache); no trails on the player's car; no black reflections on car lights / glass
+- World editing, Blender (2026-10-19)
+- 1.58 (2026-10-19): world editor copies (Ctrl+D) and baking props into the track units
+- World editing, step 1 (2026-10-19): bundles rewritten, props added to a track unit (test)
+- 1.57 (2026-10-19, from 1.54): car paint reflections without a mosaic of squares
+- Rollback to 1.54 (2026-10-19)
+- 1.56 (2026-10-19): the game's clock drives our sun; the day's speed through the game's own field; no crane trails
+- 1.55 (2026-10-19): the game's time of day from the menu; the city's shadow without a saw-tooth edge
+- 1.54 (2026-10-19): buildings out of the game's shadow view still cast (the city's height map)
+- 1.53 (2026-10-19): a lit square in far buildings' shadows; shadows drawn again more often as the sun moves
+- 1.52 (2026-10-19): the sky probe cheaper; the copy after the game's deferred lights; no sky under cars
+- 1.51 (2026-10-19): no NaN dots from bright lamps in reflections; the new passes timed
+- 1.50 (2026-10-19): no relief on cars
+- 1.49 (2026-10-19): the small puddles' settings; AO over frames
+- 1.48 (2026-10-19): the reflections' copy works with the game's typeless scene; damp patches
+- 1.47 (2026-10-19): the reflections' source before the game's effects; big matte puddles
+- 1.46 (2026-10-19): the reflections' history works (FP16 overflow since 1.42); temporal AA; the sky probe
+- 1.45 (2026-10-19): anti-shimmer for bumpy reflections; the reflections' sky keeps its level
+- 1.44 (2026-10-19): reflections sharper, no jitter by default
+- 1.43 (2026-10-19): settings to find the sparkle; highlights' anti-shimmer
+- 1.42 (2026-10-19): puddles stay put; mirrors sharp; fewer glints
+- 1.41 (2026-10-19): the reflections' sky follows the time of day; no far road in it; smoother puddles
+- 1.40 (2026-10-19): menu groups by Shift+I/O; wetness by WetGround, roads first, no wet trees, puddles; rays through facades; near shadows whole
+- 1.39b / 1.39c (2026-10-19): the sky panorama fixed
+- 1.39 (2026-10-19): lamp groups edited in the menu; a lamp budget; reflections reach up, our sky in them
+- 1.38 (2026-10-18): the moon matched by its corners
+- 1.37 (2026-10-18): the game's moon moved to ours
+- 1.36 (2026-10-18): the haze by the clock; the moon hangs; the trace names the VS
+- 1.35 (2026-10-18): the game's sun sprite gone, our discs; the sun dimmer when low; the dawn's haze
+- 1.34 (2026-10-18): the sky darkens with our night; the game's disc in the debug
+- 1.33 (2026-10-18): the sky follows the sun (not the moon); a dimmer moon; the night's brightness; the paths shown
+- 1.32 (2026-10-18): our own sun by a clock
+- 1.31 (2026-10-18): the game's day tracked as a phase all day and night; our moon; the sun's flare follows ours
+- 1.30 (2026-10-18): the time of day from the game's sun's azimuth; moon shadows ours; the corona follows
+- 1.29 (2026-10-18): our sun's path (an arc) and a soft sunrise / sunset
+- 1.28 (2026-10-18): slow movers, the sun renewed at every redraw
+- 1.27 (2026-10-17): our shadow replays recorded and drawn by map; kept maps redrawn by the sun's height
+- 1.26 (2026-10-17): kept shadows follow the sun; the game's own shadow maps optional
+- 1.25 (2026-10-17): the sun shadow mask at half resolution
+- 1.24b (2026-10-16): the day / night state no longer sticks in "night"
+- 1.23 / 1.24 (2026-10-16): day / night switch; caster culling by mesh radius
+- 1.22 (2026-10-16): kept shadow maps that know their objects
+- 1.21 (2026-10-16): cached sun shadows; the rain map no longer rebuilt all the time
+- 1.20 (2026-10-16): a bench that sees GPU load under a frame cap; viewpoints through DroneCam (BENCH_PLAN.md)
+- 1.19 (2026-10-16): several selected; the editor on Ctrl+J
+- 1.18b (2026-10-16): pieces of triangle-strip models; the piece pick stays on its object
+- 1.18 (2026-10-16): pieces of one model (the developers merged several props into one mesh)
+- 1.17b / 1.17c (2026-10-16): matrices with a used w column; effects off while editing
+- 1.17 (2026-10-16): world editor, phase 1: hide / move / turn / scale the game's own objects (worldedit.inc)
+- 1.16 (2026-10-15): parallax on buildings, heights made from normal maps (matheight.inc)
+- 1.15 (2026-10-15): parallax: no grooves at the texture's repeats
+- 1.14 (2026-10-15): parallax on roads / pavements (matpom.inc)
+- 1.13 (2026-10-15): stutter fixed, debug views at a fixed exposure, the picker saves the shader
+- 1.12 (2026-10-15): relief tuned (user: walls want 2.1-2.5, cars 1.0-1.1; edges too sharp, "charcoal")
+- 1.11 (2026-10-15): relief from normal maps (small sun shadows, cavities)
+- 1.10 (2026-10-15): textures filled after creation
+- 1.09 (2026-10-15): texture replacement, material picker (texreplace.inc)
+- 1.08 (2026-10-15): modern lighting model (GGX / PBR)
+- 1.07 (2026-10-15): far cascades rebuilt continuously (moving things left trails)
+- 1.06 (2026-10-15): fewer draws into our cascades
+- 1.05 (2026-10-15): far cascades no longer rebuilt every frame; built over frames, swapped
+- 1.04 (2026-10-15): no geometry shader; near cascades every frame, far ones kept
+- 1.03 (2026-10-15): our shadow maps depth-only unless the game's PS cuts out
+- 1.02 (2026-10-15): casters from all of the game's cascades
+- 1.01 (2026-10-15): our own sun shadow maps (sunshadow.inc)
+- 1.00 (2026-10-15): wet-ground blotches, debug views by exposure
+- Reflection debug views; wet floors reflect as nearly flat (0.99)
+- The "clouds" were our puddles; reflections follow the wetness (0.98)
+- Gloss fix: on (0.96) and replacing the game's blotchy gloss (0.97)
+- Gloss fix really on (0.96)
+- The game's gloss before its lighting; reflections follow the wetness (0.95)
+- The game's wetness as a setting; wetness fades under roofs (0.94)
+- Soft dry edges, no sky in dry walls, the game's wetness found (0.93)
+- Rain map kept and moved, dry floors under roofs, ceilings (0.91) + car paint reflections (0.92)
+- Rain map kept and moved, dry floors under roofs, ceilings (0.91)
+- Rain map from above (0.90)
+- Custom keeps your values; rain wetness by sky / material / puddles (0.89)
+- Photo look (DLSS-like) preset, CAS (0.88)
+- Start behind ReShade's hooks (0.87)
+- 80% / 100% clouds, full backup, installer (0.86)
+- Clouds: detail fades with distance, half-size option, skip what the city hides (0.85)
+- ReShade-safe hooking, release folder (0.84)
+- Cloud history: accumulate, clamp, sharp resampling (0.83)
+- No stall, clouds fixed in the world, checkerboard march, cloud-shadow map (0.82)
+- Cloud shadows really applied, less cotton wool, exact view direction (0.81)
+- Clouds after Horizon Zero Dawn (Nubis), quarter-res cloud pass (0.80)
+- Volumetric clouds, cloud shadows (0.79)
+- Our sky (0.78)
+- Sky research (0.77)
+- Ghost lights, crash, parked truck (0.76)
+- Lit cars remembered for a minute (0.75)
+- Lights out of view, parked guard, per-model light places (0.74)
+- Far traffic, faster switch-on, mesh bounds working (0.73)
+- Traffic lights back, front/rear settings, lamp editor air (0.72)
+- Timing (0.19)
+- Truck lights from mesh bounds, stricter "driving" test (0.71)
+- Traffic lights on the car, same frame (0.70)
+- 0.68-0.69 (2026-10-14): traffic lights tied to the cars
+- 0.66-0.67 (2026-10-14): traffic lights from the image
+- 0.64-0.65 (2026-10-14): headlights tuned, soft headlight shadows
+- 0.62-0.63 (2026-10-14): headlight beams
+- 0.61 (2026-10-14): lamp light hybrid
+- 0.55-0.59 (2026-10-14): reflections fixed up, atmosphere
+- 0.54 (2026-10-13): screen-space reflections, wet ground
+- 0.50-0.53 (2026-10-13): the look, sky occlusion
+- 0.45-0.49 (2026-10-13): optimisation with the bench
+- 0.43-0.44 (2026-10-13): night ambient, shadow research, lamp shadow maps
+- 0.42 (2026-10-13): screen-space lamp shadows
+- 0.41 (2026-10-13): 256 lamps, screen tiles
+- 0.40 (2026-10-13)
+- 0.39
+- 0.36-0.38
+- 0.34-0.35
+- 0.33: lamps on every post (templates)
+- 0.32: lamps tied to breakable props (from the research log, kept as _NFSLight/research_objects_2026-10-12.log)
+- 0.31: object research tools (image-based lamp breaking dropped at the user's request; 0.30 reverted)
+- 0.30: lamps follow their posts (image based)
+- 0.29: lamp shading
+- 0.27
+- 0.25
+- 0.23: editor targets + free camera (DroneCam)
+- 0.22: lamp map
+- 0.21: no feedback cap, lamps
+- Bounce light (0.20)
