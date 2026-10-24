@@ -96,7 +96,7 @@ static const float kSsShiftReach = 200.0f;       // casters up to this far (m) a
 static unsigned g_ssGameSkipped;                 // the game's own shadow draws left out (SkipGameShadows)
 static float g_ssSunStepFixed;                  // (test harness: one fixed sun step, deg, for all kept maps; 0 = by the sun's height)
 static void SsFlush(ID3D11DeviceContext* ctx);   // (1.27: our recorded replays drawn)
-static unsigned g_ssRecStat[3];                  // recorded, drawn at once (could not be kept), flushes (between log lines)
+static unsigned g_ssRecStat[4];                  // recorded, drawn at once (could not be kept), flushes, rain map / lamp face replays (between log lines)
 static float g_ssUpEdge = 0.35f;                 // PS_SunUp: texels around differing more: the pixel made at full resolution
 static bool g_ssFailed;
 // kept cascades 1, 2, 3 (index 0, 1, 2): placement, kept, drawn again in shares
@@ -1789,11 +1789,11 @@ static void SsStatTick()
     if (g_frame % 900 == 0 && g_p[P_SS].v > 0.5f && (g_ssStat.game[0] | g_ssStat.game[1] | g_ssStat.game[2])) {
         Log("sun shadows (last 900 frames, per frame): the game's cascades %u / %u / %u draws; ours near %u, far %u (cut-outs %u, depth only %u); "
             "far rebuilt %u times (over frames, swapped); skipped: no view %u, topology %u, out of reach %u; meshes known %u; CPU %.2f ms; "
-            "the game's own draws left out %u (SkipGameShadows); recorded %u, drawn at once %u, flushes %u; kept maps drawn again for: "
+            "the game's own draws left out %u (SkipGameShadows); recorded %u, drawn at once %u, flushes %u (rain map + lamp face draws in them %u); kept maps drawn again for: "
             "a start %u, the camera %u, the sun %u, a moving thing %u, age %u; slow movers %d",
             g_ssStat.game[0] / 900, g_ssStat.game[1] / 900, g_ssStat.game[2] / 900, g_ssStat.drawsNear / 900, g_ssStat.drawsFar / 900,
             g_ssStat.cut / 900, g_ssStat.depthOnly / 900, g_ssStat.rebuilds, g_ssStat.noVs / 900, g_ssStat.topo / 900, g_ssCulled / 900,
-            g_ssMeshKnown, g_ssCpuAcc / 900, g_ssGameSkipped / 900, g_ssRecStat[0] / 900, g_ssRecStat[1] / 900, g_ssRecStat[2] / 900,
+            g_ssMeshKnown, g_ssCpuAcc / 900, g_ssGameSkipped / 900, g_ssRecStat[0] / 900, g_ssRecStat[1] / 900, g_ssRecStat[2] / 900, g_ssRecStat[3] / 900,
             g_ssStat.why[0], g_ssStat.why[1], g_ssStat.why[2], g_ssStat.why[3], g_ssStat.why[4], g_ssMoverN);
         g_ssCulled = 0; g_ssGameSkipped = 0; memset(g_ssRecStat, 0, sizeof(g_ssRecStat));
         memset(&g_ssStat, 0, sizeof(g_ssStat));
@@ -1926,24 +1926,29 @@ static void SsFlush(ID3D11DeviceContext* ctx)
     ctx->VSGetShader(&sVs, 0, 0); ctx->VSGetConstantBuffers(0, 14, sVcb); ctx->VSGetShaderResources(0, 16, sVsrv);
     ctx->PSGetShader(&sPs, 0, 0); ctx->PSGetShaderResources(0, 8, sPsrv); ctx->PSGetSamplers(0, 8, sPsmp); ctx->PSGetConstantBuffers(0, 4, sPcb);
     ctx->RSGetState(&sRs); ctx->RSGetViewports(&nVp, sVp); ctx->OMGetDepthStencilState(&sDs, &sRef); ctx->OMGetRenderTargets(8, sRtv, &sDsv);
-    ctx->RSSetState(g_ssRs);
     ctx->OMSetDepthStencilState(g_ssDs, 0);
-    D3D11_VIEWPORT q = { 0, 0, (float)g_ssRes, (float)g_ssRes, 0, 1 };
-    ctx->RSSetViewports(1, &q);
-    ID3D11DepthStencilView* dsvOf[9] = { g_ssNearDsv, g_ssC1Dsv, g_ssC2Dsv, g_ssFarDsv[0][g_ssFar[0].cur], g_ssFarDsv[1][g_ssFar[1].cur],
-                                         g_ssFarDsv[2][g_ssFar[2].cur], g_ssFarDsv[0][g_ssFar[0].cur ^ 1], g_ssFarDsv[1][g_ssFar[1].cur ^ 1],
-                                         g_ssFarDsv[2][g_ssFar[2].cur ^ 1] };
+    // 1.65: + the rain map (9) and this frame's lamp shadow face (10): their replays were drawn one by one in the game's
+    // pass, each switching the depth target twice (~9 us of GPU each: 40-900 rain + 100 lamp draws a frame)
+    ID3D11DepthStencilView* dsvOf[11] = { g_ssNearDsv, g_ssC1Dsv, g_ssC2Dsv, g_ssFarDsv[0][g_ssFar[0].cur], g_ssFarDsv[1][g_ssFar[1].cur],
+                                          g_ssFarDsv[2][g_ssFar[2].cur], g_ssFarDsv[0][g_ssFar[0].cur ^ 1], g_ssFarDsv[1][g_ssFar[1].cur ^ 1],
+                                          g_ssFarDsv[2][g_ssFar[2].cur ^ 1], g_rainCur >= 0 ? g_rainDsv[g_rainCur] : 0,
+                                          g_lsFace >= 0 && g_lsFaceSlot >= 0 ? g_lsDsv[g_lsFaceSlot * kLsFaces + g_lsFace] : 0 };
     static const int kPackOf[9] = { 0, 1, 3, 1, 3, 5, 2, 4, 6 };
     unsigned all = 0;
     for (int i = 0; i < g_ssRecN; ++i) all |= g_ssRec[i].tgts;
-    for (int t = 0; t < 9; ++t) {
+    bool lampCut = g_p[P_LAMP_SHADOW_CUT].v > 0.5f;
+    for (int t = 0; t < 11; ++t) {
         if (!((all >> t) & 1) || !dsvOf[t]) continue;
         ctx->OMSetRenderTargets(0, 0, dsvOf[t]);
+        float res = t == 9 ? (float)kRainRes : t == 10 ? (float)kLsRes : (float)g_ssRes;
+        D3D11_VIEWPORT q = { 0, 0, res, res, 0, 1 };
+        ctx->RSSetViewports(1, &q);
+        ctx->RSSetState(t == 9 ? g_rainRs : t == 10 ? g_lsRs : g_ssRs);
         ID3D11InputLayout* curIl = (ID3D11InputLayout*)1; ID3D11VertexShader* curVs = (ID3D11VertexShader*)1; ID3D11PixelShader* curPs = (ID3D11PixelShader*)1;
         for (int i = 0; i < g_ssRecN; ++i) {
             SsRec& r = g_ssRec[i];
             if (!((r.tgts >> t) & 1)) continue;
-            ID3D11Buffer* vp = SsVpCbFor(ctx, r.e->vpOff, kPackOf[t]);
+            ID3D11Buffer* vp = t == 9 ? RainCbFor(ctx, r.e->vpOff, false) : t == 10 ? LsCbFor(ctx, r.e->vpOff) : SsVpCbFor(ctx, r.e->vpOff, kPackOf[t]);
             if (!vp) continue;
             if (r.il != curIl) { ctx->IASetInputLayout(r.il); curIl = r.il; }
             ctx->IASetVertexBuffers(0, 8, r.vb, r.vbS, r.vbO);
@@ -1955,10 +1960,11 @@ static void SsFlush(ID3D11DeviceContext* ctx)
             cb[r.e->vpSlot] = vp;
             ctx->VSSetConstantBuffers(0, 14, cb);
             if (r.e->srvMask) ctx->VSSetShaderResources(0, 16, r.vsrv);
-            if (r.ps != curPs) { oPSSetShader(ctx, r.ps, 0, 0); curPs = r.ps; }
-            if (r.ps) { ctx->PSSetShaderResources(0, 8, r.psrv); ctx->PSSetSamplers(0, 8, r.psmp); ctx->PSSetConstantBuffers(0, 4, r.pcb); }
+            ID3D11PixelShader* ps = t == 10 && !lampCut ? 0 : r.ps;   // (lamp faces: cut-outs only if LampShadowCutouts)
+            if (ps != curPs) { oPSSetShader(ctx, ps, 0, 0); curPs = ps; }
+            if (ps) { ctx->PSSetShaderResources(0, 8, r.psrv); ctx->PSSetSamplers(0, 8, r.psmp); ctx->PSSetConstantBuffers(0, 4, r.pcb); }
             Replay(ctx, r.d);
-            if (t >= 3) ++g_ssStat.drawsFar; else ++g_ssStat.drawsNear;
+            if (t >= 9) ++g_ssRecStat[3]; else if (t >= 3) ++g_ssStat.drawsFar; else ++g_ssStat.drawsNear;
         }
     }
     // the game's state again
@@ -1986,19 +1992,16 @@ static bool SsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
 {
     SsStatTick();
     if (!g_sunShadowTex) return false;
-    ID3D11DepthStencilView* dsv = 0;
-    ctx->OMGetRenderTargets(0, 0, &dsv);
-    ID3D11Resource* res = 0;
-    if (dsv) dsv->GetResource(&res);
-    if (res) res->Release();
+    ID3D11DepthStencilView* dsv = 0;   // (1.65: asked once a draw, not held: bound for the draw)
+    ID3D11Resource* res = DrawDsv(ctx, &dsv);
     // GPU time of the whole shadow pass (the game's and ours): from its first draw to the first draw after it
     bool shadowDraw = dsv && res == g_sunShadowTex;
     if (shadowDraw && g_ssPassFrame != g_frame + 1) { g_ssPassFrame = g_frame + 1; g_ssPassOpen = true; ProfMark(ctx, PR_SHPASS, 0); }
     else if (!shadowDraw && g_ssPassOpen) { g_ssPassOpen = false; SsFlush(ctx); ProfMark(ctx, PR_SHPASS, 1); }
-    if (!shadowDraw || g_p[P_SS].v < 0.5f || g_ssFailed || g_ssNight) { if (dsv) dsv->Release(); return false; }
+    if (!shadowDraw || g_p[P_SS].v < 0.5f || g_ssFailed || g_ssNight) { return false; }
     D3D11_VIEWPORT vp; UINT nv = 1;
     ctx->RSGetViewports(&nv, &vp);
-    if (!nv || vp.Height < 1) { dsv->Release(); return false; }
+    if (!nv || vp.Height < 1) { return false; }
     CpuTimer cpu;
     LARGE_INTEGER q0;
     QueryPerformanceCounter(&q0);
@@ -2007,12 +2010,9 @@ static bool SsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     if (gc < 0) gc = 0; else if (gc > 2) gc = 2;
     ++g_ssStat.game[gc];
     if (g_ssFrame != g_frame + 1) SsFrameStart(ctx);
-    if (!g_ssLive) { dsv->Release(); return false; }
-    ID3D11VertexShader* vs = 0;
-    ctx->VSGetShader(&vs, 0, 0);
-    VsInfo* e = VsFind(vs, false);
-    if (vs) vs->Release();
-    if (!e || e->vpSlot < 0 || e->vpSlot == e->wSlot || e->vpOff + 64 > 1024) { ++g_ssStat.noVs; dsv->Release(); return false; }
+    if (!g_ssLive) { return false; }
+    VsInfo* e = DrawVs(ctx);   // (1.65: asked once a draw)
+    if (!e || e->vpSlot < 0 || e->vpSlot == e->wSlot || e->vpOff + 64 > 1024) { ++g_ssStat.noVs; return false; }
     if (!g_ssGameVpFrame[gc] && (g_frame % 300 == 150 || !g_ssGameHalf[gc])) {   // the game's cascade's view: its size
         if (!g_ssGameVp[gc]) { D3D11_BUFFER_DESC bd = {}; bd.ByteWidth = 64; bd.Usage = D3D11_USAGE_STAGING; bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; g_dev->CreateBuffer(&bd, 0, &g_ssGameVp[gc]); }
         ID3D11Buffer* cb = 0;
@@ -2029,7 +2029,7 @@ static bool SsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     }
     D3D11_PRIMITIVE_TOPOLOGY top;
     ctx->IAGetPrimitiveTopology(&top);
-    if (top != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST && top != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP) { ++g_ssStat.topo; dsv->Release(); return false; }
+    if (top != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST && top != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP) { ++g_ssStat.topo; return false; }
     // which instance this is: still (seen in two frames running) or not (new, or moving: a new matrix every frame)
     unsigned long long mesh = 0;
     float T[3] = { 0, 0, 0 };
@@ -2090,7 +2090,7 @@ static bool SsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
             else F.budgetHit = true;
         }
     }
-    if (!nt) { dsv->Release(); return skip; }
+    if (!nt) { return skip; }
     ID3D11PixelShader* ps = 0;
     ctx->PSGetShader(&ps, 0, 0);
     bool dropPs = ps && !PsIsCut(ps);   // nothing cut out: depth only, no pixel shader (fast)
@@ -2098,7 +2098,7 @@ static bool SsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     {   // recorded: drawn after the pass with the others, by map (1.27)
         unsigned short tgts = 0;
         for (int t = 0; t < nt; ++t) tgts |= (unsigned short)(1u << tg[t].id);
-        if (SsRecord(ctx, e, d, tgts, dropPs ? 0 : ps)) { if (ps) ps->Release(); dsv->Release(); return skip; }
+        if (SsRecord(ctx, e, d, tgts, dropPs ? 0 : ps)) { if (ps) ps->Release(); return skip; }
     }
     // save
     ID3D11Buffer* sCb = 0; ctx->VSGetConstantBuffers(e->vpSlot, 1, &sCb);
@@ -2130,7 +2130,6 @@ static bool SsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     ctx->OMSetDepthStencilState(sDs, sRef);
     IUnknown* rel[] = { sCb, sRs, sDs, sRtv, ps };
     for (int k = 0; k < 5; ++k) if (rel[k]) rel[k]->Release();
-    dsv->Release();
     return skip;
 }
 

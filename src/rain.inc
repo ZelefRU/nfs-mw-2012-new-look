@@ -181,15 +181,12 @@ static void RainShift(ID3D11DeviceContext* ctx, const float* nc)
 static void RainAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
 {
     if (g_p[P_SSR + 1].v <= 0 || !g_sunShadowTex) return;
-    ID3D11DepthStencilView* dsv = 0;
-    ctx->OMGetRenderTargets(0, 0, &dsv);
+    ID3D11DepthStencilView* dsv = 0;   // (1.65: asked once a draw, not held: bound for the draw)
+    ID3D11Resource* res = DrawDsv(ctx, &dsv);
     if (!dsv) return;
-    ID3D11Resource* res = 0;
-    dsv->GetResource(&res);
-    if (res) res->Release();
     D3D11_VIEWPORT vp; UINT nv = 1;
     ctx->RSGetViewports(&nv, &vp);
-    if (res != g_sunShadowTex || !nv || vp.TopLeftY < vp.Height * 1.5f || !g_camKnown || !RainEnsure()) { dsv->Release(); return; }
+    if (res != g_sunShadowTex || !nv || vp.TopLeftY < vp.Height * 1.5f || !g_camKnown || !RainEnsure()) { return; }
     if (g_rainRun != g_frame + 1) {   // the cascade starts
         g_rainRun = g_frame + 1;
         g_rainLastIdx = g_rainIdx; g_rainIdx = 0;
@@ -213,15 +210,18 @@ static void RainAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
             for (int k = 0; k < g_rainCbN; ++k) RainCbFor(ctx, g_rainCbs[k].off, true);
         }
     }
-    ID3D11VertexShader* vs = 0;
-    ctx->VSGetShader(&vs, 0, 0);
-    VsInfo* e = VsFind(vs, false);
-    if (vs) vs->Release();
-    if (!e || e->vpSlot < 0 || e->car || e->vpSlot == e->wSlot || e->vpOff + 64 > 1024) { dsv->Release(); return; }
+    VsInfo* e = DrawVs(ctx);   // (1.65: asked once a draw)
+    if (!e || e->vpSlot < 0 || e->car || e->vpSlot == e->wSlot || e->vpOff + 64 > 1024) { return; }
     unsigned idx = g_rainIdx++;
-    if (idx < g_rainCursor || idx >= g_rainCursor + g_rainBudget) { dsv->Release(); return; }
+    if (idx < g_rainCursor || idx >= g_rainCursor + g_rainBudget) { return; }
     ID3D11Buffer* our = RainCbFor(ctx, e->vpOff, false);
-    if (!our) { dsv->Release(); return; }
+    if (!our) { return; }
+    ID3D11PixelShader* ps = 0;
+    ctx->PSGetShader(&ps, 0, 0);
+    bool dropPs = ps && !PsIsCut(ps);   // nothing cut out: depth only
+    // 1.65: recorded, drawn after the game's pass with the shadow replays (target 9): no depth target switch here (900
+    // draws a frame while the map fills: ~16 ms of GPU in switches each time the map moved)
+    if (SsRecord(ctx, e, d, 1 << 9, dropPs ? 0 : ps)) { if (ps) ps->Release(); return; }
     ID3D11RenderTargetView* savedRtv = 0;
     ID3D11DepthStencilView* dummy = 0;
     ctx->OMGetRenderTargets(1, &savedRtv, &dummy);
@@ -235,9 +235,6 @@ static void RainAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     D3D11_VIEWPORT fv = { 0, 0, (float)kRainRes, (float)kRainRes, 0, 1 };
     ctx->RSSetViewports(1, &fv);
     ctx->RSSetState(g_rainRs);
-    ID3D11PixelShader* ps = 0;
-    ctx->PSGetShader(&ps, 0, 0);
-    bool dropPs = ps && !PsIsCut(ps);   // nothing cut out: depth only
     if (dropPs) oPSSetShader(ctx, 0, 0, 0);
     Replay(ctx, d);   // cut-outs (leaves, fences) keep the game's pixel shader: their holes stay
     if (dropPs) oPSSetShader(ctx, ps, 0, 0);
@@ -249,16 +246,12 @@ static void RainAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     ctx->RSSetState(savedRs);
     if (savedCb) savedCb->Release();
     if (savedRs) savedRs->Release();
-    dsv->Release();
 }
 
 // the player's car (bones, not a wheel) in the main view: its world matrix into this frame's staging buffer
 static void RainPlayerAfterDraw(ID3D11DeviceContext* ctx)
 {
-    ID3D11VertexShader* vs = 0;
-    ctx->VSGetShader(&vs, 0, 0);
-    VsInfo* e = VsFind(vs, false);
-    if (vs) vs->Release();
+    VsInfo* e = DrawVs(ctx);   // (1.65: asked once a draw)
     if (!e || !(e->carBits & 4) || (e->carBits & 1) || e->wSlot < 0 || !MainTarget(ctx)) return;
     int k = g_frame & 3;
     if (g_playerStageFrame[k] == g_frame + 1) return;   // one a frame

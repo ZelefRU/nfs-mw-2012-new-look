@@ -241,10 +241,7 @@ static Car g_car[kCars];
 static void CarAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& dc)
 {
     if (g_p[P_TRAFFIC].v <= 0) return;
-    ID3D11VertexShader* vs = 0;
-    ctx->VSGetShader(&vs, 0, 0);
-    VsInfo* e = VsFind(vs, false);
-    if (vs) vs->Release();
+    VsInfo* e = DrawVs(ctx);   // (1.65: asked once a draw)
     if (!e || !(e->carBits & 2) || (e->carBits & 5) || e->wSlot < 0 || !MainTarget(ctx)) return;
     if (!g_carMatBuf) {
         D3D11_BUFFER_DESC d = {};

@@ -4,6 +4,13 @@ NewLook was called NFSLight up to 1.63.
 
 Newest first. Every entry is detailed in [docs/DEVLOG.md](docs/DEVLOG.md).
 
+- 1.71 (2026-10-24): reflections without a 1-pixel outline round thin things (a 4x4 depth-aware gather)
+- 1.70 (2026-10-24): cars dry in reflections (no shining tyre tops), cars as boxes in puddle reflections, a median filter against dark / bright dots
+- 1.69 (2026-10-24): cars shaded with care (smoothed sun shadow, gentler screen-space AO / contact, less blue in shade)
+- 1.68 (2026-10-24): our anti-aliasing option (FXAA 3.11, off by default)
+- 1.67 (2026-10-24): the reflected sky matched to the sky on screen at dawn / dusk; reflected-sky tuning options
+- 1.66 (2026-10-24): AO options to compare: cosine-weighted sky occlusion, multi-bounce AO, visibility-bitmask AO
+- 1.65 (2026-10-24): full code review: lamp shadows ~25 % faster (same picture), rain map / lamp face replays batched, per-draw caches, ResizeBuffers fix, dithered output
 - 1.64 (2026-10-24): renamed NFSLight -> NewLook (old files renamed at the first start)
 - 1.63 (2026-10-20): ShadowOnly (test): one of our sun maps alone
 - 1.62 (2026-10-20, HLSL only): tail lights, under cars, dawn reflections, low-sun cascades

@@ -1,5 +1,3 @@
-> NewLook was called NFSLight up to 1.63: this log keeps the old name.
-
 # NFSLight — mod log
 
 Game: Need for Speed: Most Wanted (2012), Steam 1262560, NFS13.exe 1.5.0.0 (x86, LAA), Criterion Chameleon.
@@ -564,7 +562,7 @@ Loader: Ultimate ASI Loader (dinput8.dll from NFSMW2012 HD Effects). Our plugin:
 - Full backup: <backup folder> (game_folder: _NFSLight, _DroneCam, scripts,
   dinput8.dll, version.dll, DroneCam.ini; test_tools; game_saves). NFSLight_v071.asi.bak never existed.
 - Installer: <backup folder> [game folder] [/settings]: finds the
-  game (Steam paths or asks), refuses while NFS13.exe runs (System32 tasklist/find: Git's find shadows it),
+  game (F:/C: Steam paths or asks), refuses while NFS13.exe runs (System32 tasklist/find: Git's find shadows it),
   saves replaced files to _backup_before_NFSLight_<date>_<n>, keeps existing settings unless /settings. Tested on
   a fake game folder.
 
@@ -1820,3 +1818,105 @@ Waiting for the user's screenshots of the current glitches.
   _DroneCam/dronecam_before_newlook.cpp.bak, version_before_newlook.dll.bak).
 - Installed when the game closed: NewLook.asi + .hlsl, version.dll; scripts\NFSLight.asi / .hlsl / _cache removed
   (the asi kept as _NFSLight/NFSLight_v163.asi.bak); the data files are renamed by the mod at its first start.
+
+## 1.65 (2026-10-24): full code review: faster lamp shadows, batched rain / lamp replays, per-draw caches, fixes
+- User: review all of the code (bugs, weak spots, speed without losing quality), look at modern techniques, apply what
+  fits. Every file read; findings and their status in REVIEW_1.65.md. Backups: src/*_v164.*.bak, NewLook_v164.asi.bak,
+  NFSLight_ini_before_165.bak.
+- Measured first (the log of 1.64 at night: GPU-bound at ~50 fps, the mod 11.7-12.7 ms of GPU, of it lamps 4.7-5.2 ms).
+  New harness ltest/lampperf: PS_Lamps / PS_Half / PS_SSR at 2560x1440 on this PC's GPU (a street, 34 lamps, the
+  user's settings), GPU timestamps, outputs summed to compare versions.
+- HLSL: the screen-space marches (lamp shadows, contact shadows, sky occlusion, reflections) were latency-bound: each
+  depth read waited for the one before, each step re-solved Project's 3x3. Now RayProj (the solve set up once per
+  ray: linear along it) and the reads issued together (unrolled; reflections in groups of 4; the first hit decides as
+  before). PS_Lamps 6.3-6.9 -> 5.1-5.2 ms, bit for bit the same; PS_Half a little faster, the same; PS_SSR the same
+  speed (1 pixel in 921600 differs by rounding). LampShade's zone loop to the zones there are (it ran 16 sincos a
+  pixel). Headlight beams: the ray clipped to the spot's frustum first (all 20 samples in the beam: less noise).
+  The bounce light's history clamped to this frame's samples of the surface (no lingering). PS_Grade: triangular
+  dither of +-1 step before the 8-bit write (no banding in skies / haze).
+- GPU: the rain map's replays (40 a frame, 900 a frame while it refills after a 96 m move) and the lamp faces' were
+  drawn inside the game's shadow pass one by one, two depth-target switches each (~9 us each): now recorded and drawn
+  with the sun replays after the pass (SsFlush targets 9 / 10); the constant-buffer copies kept at night for them.
+  Harness rectest: the rain map and the lamp faces bit for bit as before.
+- CPU: Immediate() by pointer; the draw's VS info and depth target asked once a game draw (DrawScope / DrawVs /
+  DrawDsv) instead of 3-5 times; world matrix keys memoised by the matrix (WeMemoOf; 12 floorf + 64-bit multiplies
+  per draw before), the shadow instance hash on 32-bit lanes; found lamps against the 4000-lamp map by a 4 m grid
+  (~800k distances a frame before); the menu text redrawn only when it changed; SaveIni one section write (initest:
+  188 values back); the building normal maps read back without waiting (a stall per new material); the prop memory
+  scan backs off to 2 min when it finds nothing.
+- Fixes: ResizeBuffers hooked (the overlay's back-buffer view made a resolution change / full-screen switch fail);
+  MakeRT frees a half-made target; the reflection targets do not retry a failed size every frame; the world editor's
+  per-frame stats divided by the real frame count (they were x2 at 50 fps).
+- Harnesses after the change: raintest, wetest, wecopy, cbcopy, aotest, taatest, citytest, gradetest, shadowtest2,
+  rectest, initest: all pass. Installed (the game closed): scripts\NewLook.asi + NewLook.hlsl.
+- Not done (waiting for a decision, they change the look): GTAO's cosine-weighted sky occlusion and multi-bounce AO;
+  a visibility-bitmask AO / bounce light as an option. Not measured in game yet: the CPU savings (the stats lines:
+  "world editor", "sun shadows ... rain map + lamp face draws", "timing").
+
+## 1.66 (2026-10-24): modern AO options to compare (PLAN_1.66.md; all off by default)
+- User: make the GTAO / bitmask ideas options to compare. Backups: src/*_v165.*.bak, NewLook_v165.asi.bak.
+- AMBIENT & OCCLUSION group, new: SkyOcclusionCosine (188: SkyVis 1 - h^2, cosine-weighted as GTAO), AOMultiBounce
+  (189: PS_Sun's ambient AO per albedo channel, Jimenez et al. 2016 fit), AOBitmask (190: ScreenAO as a visibility
+  bitmask, Therrien et al. 2023: 2 slices through the normal x 2 sides x 3 steps, 32 cosine-weighted sectors, each
+  sample covering its front to its back (thickness 0.3-0.5 m): light passes behind thin posts and rails). LightCB P25.
+- lampperf mode 1: options off = 1.65's output bit for bit; on: PS_Half 0.59 -> 0.63 ms at 2560x1440. Installed.
+- To compare in game: the bitmask AO is lighter than the old one at the same AOStrength (no 1.6x boost: it is the
+  cosine-weighted share itself); raise AOStrength to taste.
+
+## 1.66b (2026-10-24, HLSL only): reflected sky where it was never seen matches the sky on screen
+- User (debug sky map screenshots): the probe (bottom) a blue day sky under an orange dusk, lit under a night sky,
+  black at night, against the seen panorama (top). The probe is the sky's own draw, before our dusk / night darkening
+  and haze; PanoSky scaled it by brightness only, clamped 0.2 .. 1.2. Now per colour channel, 0.02 .. 1.5, and a black
+  probe gives the seen sky's mean. Backup src/NewLook_v166.hlsl.bak. Installed (Shift+P reloads it in game).
+
+## 1.66c (2026-10-24): reflected-sky debug sliders (the user tunes; 1.66b alone did not help: the seen panorama was
+## nearly black / unseen at dawn and the puddles showed a white sky)
+- REFLECTIONS: ReflSkyBright (191, x), ReflSkySource (192: 0 auto, 1 the seen sky only, 2 the probe only matched, 3 the
+  probe as drawn), ReflSkyMatch (193: how much the probe takes the seen sky's colour), ReflSkyLevel (194: the seen
+  panorama stored by the sky's level now and read times it, or as seen: suspected of the white at dawn when the
+  level rises). LightCB P26. Backups *_v166.*.bak, NewLook_v166.asi.bak. Installed (asi + hlsl together).
+
+## 1.67b (2026-10-24, HLSL): reflected sky at dawn / dusk
+- The probe was matched to the seen sky only with 5 % of the panorama seen; at dawn / dusk less is: the probe went in
+  as drawn (bright orange clouds over a dark sky; the wet ground glowed). Now from 0.5 % (the seen mean is divided by
+  its coverage anyway), and the match never brightens (ratio up to 1, was 1.5). Backup src/NewLook_v166c.hlsl.bak.
+
+## 1.68 (2026-10-24): our anti-aliasing (FXAA 3.11)
+- User: a light anti-aliasing of our own (the game's renders twice the pixels: 2560x2880 for 2560x1440).
+- LOOK (COLOUR): AntiAliasing (195, off by default), AASoftness (196, sub-pixel blend 0..1, 0.5): FXAA 3.11 quality
+  (8 search steps) on the game's finished picture in PS_Grade, before CAS sharpening and the grading (needs LOOK on);
+  GradeCB Gr5.w = 1 + softness. Compiled; cost not measured in game (FXAA: ~0.2-0.4 ms at 1440p is typical).
+  Backups *_v167.*.bak, NewLook_v167.asi.bak. Installed.
+
+## 1.69 (2026-10-24, HLSL): cars shaded with care; dark dots in reflections
+- User (screenshots: blotches in steps on the white 911, a mirror's shadow in texels, blue patches; black dots in
+  reflections). On car bodies (OnCar): our sun shadow from 5 mask taps 2 px apart (same cascade); screen-space AO and
+  contact shadows a third as strong (half-res blotches on curved panels); the blue shadow tint 40% as strong.
+  SSRBlur: a lone dark texel raised to half its neighbours' darkest (as the bright cap of 1.60).
+  Backup src/NewLook_v168.hlsl.bak. Installed (Shift+P).
+
+## 1.70 (2026-10-24): cars in reflections, dark dots by a median, car paint layers
+- User: black dots in strong reflections again (a new approach asked); a tyre's top shining; the car missing from the
+  puddles seen from above; better paint (clear coat, metallic, soft highlights).
+- Reflections: nothing in a car's box is wet road (SsrRay and SSRApply: wet / puddle x (1 - OnCar)): the tyre's top
+  under its arch no longer reflects the sky like a puddle. RayCars: the cars as boxes (1.9 x 4.6 x 1.2 m) for a floor's
+  ray that leaves the screen / meets the sky: through a car's box within 25 m it sees its dark body (sky x 0.08).
+  SSRBlur: the 1.69 dark floor replaced by a median test: a texel under half / over twice (+0.05) its 3x3's median of
+  row medians takes that median (dark and bright dots alike, edges kept).
+- Paint (modern lighting, cars' boxes with a bright specular): the colour with a softer highlight (PaintSoft 198,
+  0.4), a clear coat over it (PaintClearCoat 197, 0.6: GGX F0 4 %, roughness 0.045), metallic flakes on the player's
+  car (PaintFlakes 199, 0.4: 3 mm cells on its body, tilted mirrors). MATERIALS group. LightCB P27.
+- Backups *_v169.*.bak, NewLook_v169.asi.bak. All 28 shaders compile. Installed.
+
+## 1.70b (2026-10-24, HLSL): paint found by a paint-like specular; a bigger car box in reflections
+- User: the paint layers showed only on rims and tail lights; the car still missing from the puddles. Paint: specular
+  luminance 0.02 .. 0.3 (the body's; chrome above, rubber below; it was over 0.1: rims, lamps). RayCars box x +-1.1,
+  y -0.7 .. 1.4 (the car's place may be its body's middle), z +-2.5; a hit found farther than a car's box on the
+  way is darkened too (a bright far texel seen past the car's underside). Backup src/NewLook_v170.hlsl.bak. Installed.
+
+## 1.71 (2026-10-24): reflections' 1-pixel outlines; the paint layers taken out
+- User: the paint layers did not show on the body: removed (HLSL block and the menu entries; params 197-199 kept,
+  unused). The outline round thin things (poles, window frames) in reflections: SSRApply took the 4 nearest half-size
+  texels by place, weighted 1/(diff): on a thin thing none was its own, the background's reflection came in. Now a 4x4
+  window, the ring weak by place, every texel by exp2(-3 x distance misfit): its own texel wins where there is one.
+  Backup src/NewLook_v170b.hlsl.bak. Installed.

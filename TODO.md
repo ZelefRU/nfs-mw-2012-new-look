@@ -26,6 +26,11 @@ Rule: features first, polish later; items marked (check) are fixed but not yet s
   the game's time fields are in MODLOG "Rollback to 1.54").
 - The city map's finer edge and crane skip from 1.55 / 1.56 (kept in *_v156.bak).
 
+- 1.66: options SkyOcclusionCosine / AOMultiBounce / AOBitmask made (AMBIENT & OCCLUSION): the user compares them. (was: GTAO cosine, multi-bounce / bright
+  surfaces: changes the look) - as options to compare?
+- Visibility-bitmask AO / bounce light (Therrien et al. 2023: thin objects) as an option - a bigger rewrite.
+- PS_SunMask: check in its disassembly whether SsDepth / SsCmp read every cascade per tap (0.9 ms; needs a harness).
+
 ## World editing
 - Collision for new objects (Blender: the TRK_COL collection, PolygonSoupList).
 - Not yet tried in game: world editor copies (Ctrl+D) and worldtools/bake.bat.

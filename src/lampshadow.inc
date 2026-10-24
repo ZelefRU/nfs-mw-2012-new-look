@@ -167,20 +167,20 @@ static ID3D11Buffer* LsCbFor(ID3D11DeviceContext* ctx, int off)
     return LsCbFor(ctx, off);
 }
 
+// (sunshadow.inc) 1.65: a draw recorded for maps tgts, drawn with the others after the game's shadow pass
+static bool SsRecord(ID3D11DeviceContext* ctx, VsInfo* e, const DrawCall& d, unsigned short tgts, ID3D11PixelShader* ps);
+
 // After every game draw: inside the sun map's widest cascade, the same draw again into this frame's lamp face.
 static void LsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
 {
     if (!g_sunShadowTex || !g_lsSrv || g_p[P_LAMP_SHADOW_MAPS].v < 0.5f) return;
-    ID3D11DepthStencilView* dsv = 0;
-    ctx->OMGetRenderTargets(0, 0, &dsv);
+    ID3D11DepthStencilView* dsv = 0;   // (1.65: asked once a draw, not held: bound for the draw)
+    ID3D11Resource* res = DrawDsv(ctx, &dsv);
     if (!dsv) return;
-    ID3D11Resource* res = 0;
-    dsv->GetResource(&res);
-    if (res) res->Release();
-    if (res != g_sunShadowTex) { dsv->Release(); return; }
+    if (res != g_sunShadowTex) { return; }
     D3D11_VIEWPORT vp; UINT nv = 1;
     ctx->RSGetViewports(&nv, &vp);
-    if (!nv || vp.TopLeftY < vp.Height * 1.5f) { dsv->Release(); return; }   // not the widest cascade
+    if (!nv || vp.TopLeftY < vp.Height * 1.5f) { return; }   // not the widest cascade
     unsigned budget = (unsigned)g_p[P_LAMP_SHADOW_BUDGET].v;
     if (g_lsRunFrame != g_frame + 1) {   // the cascade starts
         bool first = !g_lsRunFrame;
@@ -206,17 +206,21 @@ static void LsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
             }
         }
     }
-    if (g_lsFace < 0) { dsv->Release(); return; }
-    ID3D11VertexShader* vs = 0;
-    ctx->VSGetShader(&vs, 0, 0);
-    VsInfo* e = VsFind(vs, false);
-    if (vs) vs->Release();
-    if (!e || e->vpSlot < 0 || e->car || e->vpSlot == e->wSlot || e->vpOff + 64 > 1024) { dsv->Release(); return; }
+    if (g_lsFace < 0) { return; }
+    VsInfo* e = DrawVs(ctx);   // (1.65: asked once a draw)
+    if (!e || e->vpSlot < 0 || e->car || e->vpSlot == e->wSlot || e->vpOff + 64 > 1024) { return; }
     unsigned idx = g_lsIdx++;
-    if (idx < g_lsCursor || idx >= g_lsCursor + budget) { dsv->Release(); return; }   // another frame's share
+    if (idx < g_lsCursor || idx >= g_lsCursor + budget) { return; }   // another frame's share
     ID3D11Buffer* our = LsCbFor(ctx, e->vpOff);
-    if (!our) { dsv->Release(); return; }
-    // save, draw into the lamp face, restore
+    if (!our) { return; }
+    {   // 1.65: recorded, drawn after the game's pass with the shadow replays (target 10): no depth target switch here
+        ID3D11PixelShader* ps = 0;
+        ctx->PSGetShader(&ps, 0, 0);
+        bool rec = SsRecord(ctx, e, d, 1 << 10, ps && PsIsCut(ps) ? ps : 0);   // (SsFlush keeps cut-outs if LampShadowCutouts)
+        if (ps) ps->Release();
+        if (rec) { ++g_lsDraws; return; }
+    }
+    // save, draw into the lamp face, restore (its state could not be kept)
     ID3D11RenderTargetView* savedRtv = 0;
     ID3D11DepthStencilView* dummy = 0;
     ctx->OMGetRenderTargets(1, &savedRtv, &dummy);
@@ -243,5 +247,4 @@ static void LsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     ctx->RSSetState(savedRs);
     if (savedCb) savedCb->Release();
     if (savedRs) savedRs->Release();
-    dsv->Release();
 }

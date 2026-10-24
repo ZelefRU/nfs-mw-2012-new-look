@@ -116,7 +116,8 @@ static void GradePass(ID3D11DeviceContext* ctx)
             g_p[P_LOOK + 9].v, g_p[P_LOOK + 10].v, g_p[P_LOOK + 11].v, g_p[P_LOOK + 12].v,   // clarity, dehaze, sharpen, vignette
             g_p[P_LOOK + 13].v, log2f(td.Width / 48.0f), 1.0f / td.Width, 1.0f / td.Height,  // split toning, local average mip, texel
             g_view == 1 ? 1.0f : 0.0f, (float)(g_frame & 63), g_p[P_LOOK + 14].v, g_p[P_LOOK + 15].v,   // split screen, frame, bloom, grain
-            g_p[P_LOOK_X].v, g_p[P_LOOK_X + 1].v, g_p[P_LOOK_X + 2].v, 0 };                              // film curve, reds, highlight desaturation
+            g_p[P_LOOK_X].v, g_p[P_LOOK_X + 1].v, g_p[P_LOOK_X + 2].v,
+            g_p[195].v > 0.5f ? 1 + g_p[196].v : 0.0f };   // 1.68: our anti-aliasing (FXAA), its softness                              // film curve, reds, highlight desaturation
         D3D11_MAPPED_SUBRESOURCE m;
         if (SUCCEEDED(ctx->Map(g_cbGrade, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, gc, sizeof(gc)); ctx->Unmap(g_cbGrade, 0); }
         float rect[4] = { -1, 1, 2, 2 };

@@ -8,7 +8,7 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 
 [Русская версия](README.ru.md) · [Changelog](CHANGELOG.md) · [Known issues / TODO](TODO.md) · [Dev log](docs/DEVLOG.md)
 
-> Version **1.64** (formerly **NFSLight**). Work in progress: it runs and looks good on the author's PC; expect rough edges (see
+> Version **1.71** (formerly **NFSLight**). Work in progress: it runs and looks good on the author's PC; expect rough edges (see
 > [Known issues](#known-issues)).
 
 ## Features

@@ -38,6 +38,9 @@ cbuffer LightCB : register(b5)
     float4 P22;  // 1.43: x = highlights' anti-shimmer, y = wet stones' relief kept, z = bright dots cut (x spread), w = smoothing (0 none, 1 by gloss, 2 always)
     float4 P23;  // 1.43: x = reflections' history (x); 1.44: y = wet ground's reflections' sharpness (its gloss); 1.45: z = the sky's level now
     float4 P24;  // 1.46: x = the reflections' history held to this frame's (x its spread), y = the sky probe there (t68); 1.47: z = the scene before the effects (t70); 1.49: w = the AO's history (t71)
+    float4 P25;  // 1.66 (options to compare): x = sky occlusion cosine-weighted, y = AO multi-bounce, z = AO visibility bitmask
+    float4 P26;  // 1.67: the reflected sky off screen: x = brightness, y = source (0 auto, 1 seen, 2 probe matched, 3 probe raw), z = the probe's colour match, w = the seen sky kept by the sky's level
+    float4 P27;  // 1.70: car paint: x = clear coat, y = the colour's highlight soft, z = metallic flakes (the player's car)
 };
 // the key light our other passes use: by day ours (its light faded at the horizon), at night the game's (the moon)
 float3 SunLd() { return (P19.w > 0.5 && P20.x < 0.5) ? P18.xyz : G[L0.y].xyz; }
@@ -250,6 +253,30 @@ float SceneDist(float2 pix, float4 rayAt)
     return length(rayAt.xyz / d);
 }
 
+// 1.65: Project for the points of one ray q = o + d t, set up once: its solve's determinant and numerators are triple
+// products, linear in q, so per point they are a + b t each (the same result with a tenth of the arithmetic). The marches
+// below also read all their depth samples together (unrolled, no early exit; the first hit still decides): one after
+// another, each waiting for the last, the reads' latency was most of their cost (PS_Lamps 6.6 -> 4.9 ms at 1440p).
+struct RayProj { float2 pd, px, py; float ns; };
+RayProj ProjSetup(float3 o, float3 d, float4 ray, float4 X, float4 Y, float sgn)
+{
+    RayProj r;
+    float3 XY = cross(X.xyz, Y.xyz), RY = cross(ray.xyz, Y.xyz), XR = cross(X.xyz, ray.xyz);
+    r.pd = -float2(dot(o, XY), dot(d, XY));
+    r.px = float2(dot(o, RY), dot(d, RY));
+    r.py = float2(dot(o, XR), dot(d, XR));
+    r.ns = -dot(ray.xyz, XY) * sgn;
+    return r;
+}
+// as Project(o + d t, ray, X, Y, sgn, dpix, rayAt)
+bool ProjAt(RayProj r, float t, float4 ray, float4 X, float4 Y, out float2 dpix, out float4 rayAt)
+{
+    float det = r.pd.x + r.pd.y * t, id = 1 / det;
+    dpix = float2(r.px.x + r.px.y * t, r.py.x + r.py.y * t) * id;
+    rayAt = ray + X * dpix.x + Y * dpix.y;
+    return abs(det) >= 1e-12 && r.ns * id > 0;
+}
+
 // Sun visibility (1 = lit) at any world point, from the game's cascaded shadow map (one tap).
 float SunVisibility(float3 world)
 {
@@ -343,15 +370,17 @@ float ScreenContact(PSIn i, float3 rel, float3 n, float3 Ld, float dd, float dis
     float stepLen = P0.y / steps;
     float3 start = rel + n * P2.z;
     float occ = 0;
-    [loop] for (int s = 1; s <= 12; ++s) {
+    RayProj rp = ProjSetup(start, toL, i.t1, X, Y, dd);
+    bool alive = true;
+    [unroll] for (int s = 1; s <= 12; ++s) {   // (1.65: read together; the first hit is the highest occ)
         float t = (s - 1 + noise) * stepLen + P2.z;
-        float3 q = start + toL * t;
         float2 dp; float4 rayAt;
-        if (!Project(q, i.t1, X, Y, dd, dp, rayAt)) break;
-        float sd = SceneDist(i.pos.xy + dp, rayAt);
-        if (sd < 0) break;
-        float diffM = length(q) - sd;
-        if (diffM > 0.02 && diffM < P0.z) { occ = 1 - (s - 1) / steps; break; }
+        alive = alive && ProjAt(rp, t, i.t1, X, Y, dp, rayAt);
+        float2 uv = (i.pos.xy + dp) / Size.xy;
+        float d = tDepth.SampleLevel(sPoint, uv, 0).x - rayAt.w;
+        alive = alive && all(uv >= 0) && all(uv <= 1) && abs(d) >= 1e-9;
+        float diffM = length(start + toL * t) - length(rayAt.xyz / d);
+        if (alive && diffM > 0.02 && diffM < P0.z) occ = max(occ, 1 - (s - 1) / steps);
     }
     return 1 - P0.x * occ * saturate(1 - dist / 150.0);
 }
@@ -364,9 +393,62 @@ float HalfContact(PSIn i, float3 rel, float3 n, float3 Ld, float dd, float dist,
 }
 
 // Ambient occlusion: a few samples in the hemisphere around the normal (1 = open).
+// 1.66 (AOBitmask): ambient occlusion as a visibility bitmask (Therrien, Levesque, Gilet 2023). Per slice (a plane
+// through the normal) 32 sectors of the half-circle above the surface, spaced so that each holds the same share of
+// cosine-weighted sky ((1 - cos a) / 2 per sector): what a sample covers is the angles from its surface's front to
+// its back (the front pushed away from the camera by a thickness), so light passes behind thin things (posts, rails,
+// branches) instead of a whole horizon closing above them; the occlusion is the share of sectors set. 2 slices x
+// 2 sides x 3 steps (12 depth reads, read together).
+uint BitCount(uint v)   // (countbits is shader model 5)
+{
+    v = v - ((v >> 1) & 0x55555555u);
+    v = (v & 0x33333333u) + ((v >> 2) & 0x33333333u);
+    return (((v + (v >> 4)) & 0x0F0F0F0Fu) * 0x01010101u) >> 24;
+}
+float ScreenAOBitmask(PSIn i, float3 rel, float3 n, float dd, float dist, float noise, float4 X, float4 Y)
+{
+    float3 up = abs(n.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0);
+    float3 tx = normalize(cross(up, n)), ty = cross(n, tx);
+    float R = P1.w, thick = clamp(R * 0.5, 0.3, 0.5);
+    float3 o = rel + n * 0.03;
+    float occ = 0;
+    [unroll] for (int sl = 0; sl < 2; ++sl) {
+        float phi = (sl + noise) * 1.5707963;
+        float3 t = tx * cos(phi) + ty * sin(phi);          // the slice: angles from +t (0) over n (pi/2) to -t (pi)
+        uint bits = 0;
+        [unroll] for (int side = 0; side < 2; ++side) {
+            float3 dir = side ? -t : t;
+            RayProj rp = ProjSetup(o, dir, i.t1, X, Y, dd);
+            [unroll] for (int k = 0; k < 3; ++k) {
+                float f = (k + frac(noise * 5.31 + sl * 0.37 + side * 0.61)) / 3;
+                float r = R * (0.1 + 0.9 * f * f);
+                float2 dp; float4 rayAt;
+                bool ok = ProjAt(rp, r, i.t1, X, Y, dp, rayAt);
+                float2 uv = (i.pos.xy + dp) / Size.xy;
+                float z = tDepth.SampleLevel(sPoint, uv, 0).x - rayAt.w;
+                ok = ok && all(uv >= 0) && all(uv <= 1) && abs(z) >= 1e-9;
+                float3 S = rayAt.xyz / z;                         // the surface seen there (camera-relative)
+                float3 B = S + normalize(S) * thick;              // its back
+                float3 dS = S - rel, dB = B - rel;
+                // in front of the sample point (it is inside something) and near: it occludes
+                ok = ok && length(o + dir * r) - length(S) > 0.02 && dot(dS, dS) < 4 * R * R;
+                float aS = atan2(max(dot(dS, n), 0), dot(dS, t)), aB = atan2(max(dot(dB, n), 0), dot(dB, t));
+                float u0 = (1 - cos(min(aS, aB))) * 0.5, u1 = (1 - cos(max(aS, aB))) * 0.5;
+                uint s0 = (uint)clamp(floor(u0 * 32), 0, 32), s1 = (uint)clamp(ceil(u1 * 32), 0, 32);
+                uint cnt = s1 > s0 ? s1 - s0 : 0;
+                uint m = cnt >= 32 ? 0xFFFFFFFFu : ((1u << cnt) - 1) << s0;
+                if (ok) bits |= m;
+            }
+        }
+        occ += BitCount(bits) / 32.0;
+    }
+    return 1 - P1.z * saturate(occ * 0.5) * saturate(1 - dist / 200.0);
+}
+
 float ScreenAO(PSIn i, float3 rel, float3 n, float dd, float dist, float noise, float4 X, float4 Y)
 {
     if (P1.z <= 0) return 1;
+    if (P25.z > 0.5) return ScreenAOBitmask(i, rel, n, dd, dist, noise, X, Y);
     float3 up = abs(n.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0);
     float3 tx = normalize(cross(up, n)), ty = cross(n, tx);
     float occ = 0;
@@ -745,22 +827,23 @@ float LampVis(PSIn i, float3 rel, float3 n, float3 lampRel, float dd, float4 X, 
     if (maxT < 0.2) return 1;
     float3 start = rel + n * 0.05;
     float thick = P9.y + length(rel) * 0.01;
+    RayProj rp = ProjSetup(start, toL, i.t1, X, Y, dd);
     float prevT = 0, prevDiff = -1;
-    [loop] for (int s = 1; s <= 12; ++s) {
+    bool alive = true, hit = false;
+    [unroll] for (int s = 1; s <= 12; ++s) {
         float f = (s - 1 + noise) / 12;
         float t = 0.08 + f * f * maxT;   // denser near the pixel (contact), sparser towards the lamp
-        float3 q = start + toL * t;
         float2 dp; float4 rayAt;
-        if (!Project(q, i.t1, X, Y, dd, dp, rayAt)) break;
-        float sd = SceneDist(i.pos.xy + dp, rayAt);
-        if (sd < 0) break;
-        float diffM = length(q) - sd;
-        if (diffM > 0.04 + t * 0.01 && diffM < thick) return 1 - P9.x;
-        // stepped from behind a surface to in front of it: went through it (the window grows with the step)
-        if (prevDiff > 0.04 && diffM <= 0 && prevDiff < thick + 0.5 * (t - prevT)) return 1 - P9.x;
+        alive = alive && ProjAt(rp, t, i.t1, X, Y, dp, rayAt);
+        float2 uv = (i.pos.xy + dp) / Size.xy;
+        float d = tDepth.SampleLevel(sPoint, uv, 0).x - rayAt.w;
+        alive = alive && all(uv >= 0) && all(uv <= 1) && abs(d) >= 1e-9;   // (SceneDist: off the screen, the sky)
+        float diffM = length(start + toL * t) - length(rayAt.xyz / d);
+        // in front of a surface within its thickness, or stepped from behind it to in front (the window grows with the step)
+        hit = hit || (alive && ((diffM > 0.04 + t * 0.01 && diffM < thick) || (prevDiff > 0.04 && diffM <= 0 && prevDiff < thick + 0.5 * (t - prevT))));
         prevT = t; prevDiff = diffM;
     }
-    return 1;
+    return hit ? 1 - P9.x : 1;
 }
 
 // A point seen from a lamp: its face, uv and slice in the lamp's map, and its depth along the face (the plugin's
@@ -849,7 +932,7 @@ float3 LampShade(float3 world, float3 n, float3 V, float3 albedo, float3 oneMinu
     int zn = min(ZoneN.x, 16);
     float zw[16];
     float anyZone = 0;
-    [loop] for (int z = 0; z < 16; ++z) { zw[z] = z < zn ? ZoneIn(z, world) : 0; anyZone = max(anyZone, zw[z]); }
+    [loop] for (int z = 0; z < zn; ++z) { zw[z] = ZoneIn(z, world); anyZone = max(anyZone, zw[z]); }   // (1.65: the zones there are, not 16)
     int2 tile = clamp(int2(uv * float2(LampN.yz)), 0, LampN.yz - 1);
     uint4 ta = tTileA.Load(int3(tile, 0)), tb = tTileB.Load(int3(tile, 0));
     uint words[8] = { ta.x, ta.y, ta.z, ta.w, tb.x, tb.y, tb.z, tb.w };
@@ -1534,6 +1617,18 @@ PSOut PS_Sun(PSIn i)
     float blockerM = 0, penM = 0, cascDbg = -1, usedCoarse = 0;
     // our own maps' mask (sunshadow.inc): z = cascade, 0..3 ours (3 also its blend with the game's), 4 = past them
     float2 ssU = P10.z > 0.5 ? tSunMask.Load(int3(i.pos.xy, 0)) : float2(1, -1);
+    // 1.69: cars' bodies (OnCar: their boxes) get their own care: smooth curved paint shows what flat walls hide. The sun
+    // shadow there from 5 taps 2 px apart (same cascade): our maps' texels (a mirror's shadow in steps on the door) smoothed
+    float carK = OnCar(world);
+    [branch] if (carK > 0.5 && P10.z > 0.5) {
+        float sm = ssU.x, nm = 1;
+        [unroll] for (int q = 0; q < 4; ++q) {
+            int2 o = q == 0 ? int2(2, 0) : q == 1 ? int2(-2, 0) : q == 2 ? int2(0, 2) : int2(0, -2);
+            float2 t = tSunMask.Load(int3(int2(i.pos.xy) + o, 0));
+            if (abs(t.y - ssU.y) < 0.5) { sm += t.x; nm += 1; }
+        }
+        ssU.x = sm / nm;
+    }
     float4 ssM = float4(ssU.x, 0, ssU.y, 0);
     bool ssOurs = ssM.z >= 0 && (ssM.z < 3.5 || SP4.w > 0.5);   // (our sun: past our maps no shadow, not the game's map)
     if (ssOurs) {
@@ -1676,6 +1771,10 @@ PSOut PS_Sun(PSIn i)
     float3 sunOrig = U * gOrig * F;
     contact *= relief.x;
     ao *= relief.y;
+    // 1.69: on cars the screen-space AO and contact shadows a third as strong: the depth of curved panels, thin mirrors and
+    // trims made blotches in steps (half resolution); the game's own car shading keeps their shape
+    ao = lerp(ao, 1 - (1 - ao) * 0.3, carK);
+    contact = lerp(contact, 1 - (1 - contact) * 0.3, carK);
     // the sun, modern (P16.x) or the game's model
     float pAlpha = PbrAlpha(power);
     float3 pF0 = PbrF0(Sp);
@@ -1687,7 +1786,7 @@ PSOut PS_Sun(PSIn i)
     // Natural shadows: where the sun is blocked, the fill light is darker and bluer (sky light only).
     float shadowAmt = (1 - saturate(gNew * contact)) * saturate(ndlN * 6) + (1 - saturate(ndlN * 6));
     shadowAmt = saturate(shadowAmt) * saturate(dot(LcN, float3(0.3, 0.6, 0.1)) * 4) * sw;   // no effect at night
-    float3 fill = lerp(1.0, P3.y, shadowAmt) * lerp(1.0, float3(0.86, 0.96, 1.16), P3.z * shadowAmt);
+    float3 fill = lerp(1.0, P3.y, shadowAmt) * lerp(1.0, float3(0.86, 0.96, 1.16), P3.z * shadowAmt * (1 - 0.6 * carK));   // (1.69: less blue on paint)
     // light colour: warmer / cooler sun, and a tint of the fill light (luminance kept)
     float3 warm = float3(1 + 0.18 * P3.w, 1 + 0.02 * P3.w, 1 - 0.30 * P3.w);
     warm /= dot(warm, float3(0.2126, 0.7152, 0.0722));
@@ -1698,7 +1797,14 @@ PSOut PS_Sun(PSIn i)
     float3 gi = albedo * oneMinus * bounce;
 
     // result = ambient * K + add, then the air on top: result * hazeT + inscatter * (1 - hazeT)
-    float3 K = P2.x * ao * fill * amb;
+    // 1.66 (AOMultiBounce): light bounced around inside the occluded spot comes back to it: bright surfaces lose less of
+    // their ambient (Jimenez et al. 2016: a cubic in ao per albedo channel, fitted to ground truth)
+    float3 aoK = ao;
+    if (P25.y > 0.5) {
+        float3 ka = 2.0404 * albedo - 0.3324, kb = -4.7951 * albedo + 0.6417, kc = 2.7552 * albedo + 0.6903;
+        aoK = max(ao, ((ao * ka + kb) * ao + kc) * ao);
+    }
+    float3 K = P2.x * aoK * fill * amb;
     // at night the baked light and the sky light are dimmed (the lamps light the scene instead)
     K *= lerp(P9.z, 1, saturate((Lum(G[L0.x].xyz) - 0.5) / 2));
     // lamps at full resolution with highlights (the game's own V and gloss)
@@ -1794,22 +1900,24 @@ float SkyVis(PSIn i, float3 rel, float3 n, float dd, float dist, float noise, fl
         float ang = (a + noise) * 1.5707963;
         float3 dir = tx * cos(ang) + ty * sin(ang);
         float hs = 0;                                          // the highest horizon so far (sine)
-        [loop] for (int s = 0; s < 6; ++s) {
+        RayProj rp = ProjSetup(start, dir, i.t1, X, Y, dd);
+        bool alive = true;
+        [unroll] for (int s = 0; s < 6; ++s) {   // (1.65: read together)
             float f = (s + frac(noise * 7.13 + a * 0.37)) / 6;
-            float3 q = start + dir * (R * f * f + 0.1);
             float2 dp; float4 rayAt;
-            if (!Project(q, i.t1, X, Y, dd, dp, rayAt)) break;
+            alive = alive && ProjAt(rp, R * f * f + 0.1, i.t1, X, Y, dp, rayAt);
             float2 uv = (i.pos.xy + dp) / Size.xy;
-            if (any(uv < 0) || any(uv > 1)) break;
+            alive = alive && all(uv >= 0) && all(uv <= 1);
             float z = tDepth.SampleLevel(sPoint, uv, 0).x - rayAt.w;
-            if (abs(z) < 1e-9) continue;
             float3 v = rayAt.xyz / z - rel;                     // the surface seen there, from the point
             float lv = length(v);
             float sh = dot(v, n) / max(lv, 1e-4);
             float fall = saturate(1 - lv * lv / (R * R * 1.5));
-            hs = max(hs, sh * fall);
+            if (alive && abs(z) >= 1e-9) hs = max(hs, sh * fall);   // (the sky there: nothing)
         }
-        vis += 1 - hs;
+        // 1.66 (SkyOcclusionCosine): the sky's share above a horizon of sine h, weighted by cos (as light falls on the
+        // surface: GTAO's integral) is 1 - h^2; the plain angle share 1 - h darkened low horizons as much as high walls
+        vis += P25.x > 0.5 ? 1 - hs * hs : 1 - hs;
     }
     vis *= 0.25;
     vis = vis * vis * (3 - 2 * vis);                            // a little more contrast: open stays open
@@ -1890,7 +1998,7 @@ float4 PS_GIBlur(PSIn i) : SV_Target0
     int2 p = int2(i.pos.xy);
     int2 hmax = int2(Size.xy) - 1;
     float dc = tGIRaw.Load(int3(p, 0)).w;
-    float3 acc = 0;
+    float3 acc = 0, mn = 1e9, mx = 0;
     float ws = 0;
     [unroll] for (int y = -2; y < 2; ++y)
         [unroll] for (int x = -2; x < 2; ++x) {
@@ -1898,6 +2006,7 @@ float4 PS_GIBlur(PSIn i) : SV_Target0
             float w = saturate(1 - abs(h.w - dc) / (dc * 0.03 + 0.1)) + 1e-4;
             acc += h.rgb * w;
             ws += w;
+            if (w > 0.5 || (x == 0 && y == 0)) { mn = min(mn, h.rgb); mx = max(mx, h.rgb); }   // this surface's samples
         }
     float3 c = acc / ws;
     if (P6.w > 0.5 && dc < 5e4) {
@@ -1905,7 +2014,9 @@ float4 PS_GIBlur(PSIn i) : SV_Target0
         float2 puv; float pd;
         if (abs(dd) > 1e-9 && Reproject(HistPoint(i.t1.xyz / dd + G[L1.w].xyz, i.t0.xy), dd, puv, pd)) {   // (1.59)
             float4 h = tGIHist.SampleLevel(sPoint, puv, 0);
-            if (abs(h.w - pd) < pd * 0.03 + 0.15) c = lerp(c, h.rgb, P7.y);
+            // 1.65: the history held within this frame's samples of the surface (min .. max of the 4x4: the whole pattern,
+            // so its noise passes): bounce light that changed (a car drove off, a lamp went out) no longer lingers
+            if (abs(h.w - pd) < pd * 0.03 + 0.15) c = lerp(c, clamp(h.rgb, mn, mx), P7.y);
         }
     }
     return float4(c, dc);
@@ -1947,6 +2058,9 @@ SnapOut PS_Snap(PSIn i)
 // where the screen shows sky there (depth: none), its colour (the half-size snapshot) eased in; else kept
 float2 PanoUv(float3 d) { return float2(atan2(d.x, d.z) / 6.2831853 + 0.5, saturate((90 - degrees(asin(clamp(d.y, -1, 1)))) / 100)); }
 // 1.41: kept premultiplied (rgb x a): what is not seen again fades (a: ~8 s half), the guess below takes its place
+// 1.67 (ReflSkyLevel): the seen panorama stored divided by the sky's level now and read times it (it follows the time
+// of day), or as seen
+float PanoLevel() { return P26.w > 0.5 ? P23.z : 1; }
 float4 PS_SkyPano(PSIn i) : SV_Target0
 {
     float2 uv = i.pos.xy / float2(1024, 256);
@@ -1970,7 +2084,7 @@ float4 PS_SkyPano(PSIn i) : SV_Target0
     if (far < 15000 && (far < 25 || d.y < 0.035)) return old;
     float3 c = tRefl.SampleLevel(sLin, su, 0).rgb;
     c = c == c ? c : 0;
-    return lerp(old, float4(c / max(P23.z, 1e-3), 1), 0.35);   // (1.45: kept divided by the sky's level: it follows the time of day)
+    return lerp(old, float4(c / max(PanoLevel(), 1e-3), 1), 0.35);   // (1.45: kept divided by the sky's level: it follows the time of day)
 }
 // 1.41: the sky guessed where the panorama has nothing of late: the haze's sky light (as AirLight: the sun's by its
 // height, the city's glow at night), brighter at the horizon: it follows the time of day where the sky is not seen
@@ -1990,22 +2104,53 @@ float3 PanoSky(float3 d, float gloss)
     d = normalize(d);
     float2 uv = PanoUv(d);
     float4 c = tSkyPano.SampleLevel(sLin, uv, (1 - gloss) * 6);
+    float L = PanoLevel();
+    int src = (int)(P26.y + 0.5);   // 1.67 (ReflSkySource): 0 auto, 1 the seen sky only, 2 the probe only (matched), 3 as drawn
+    float4 seen = tSkyPano.SampleLevel(sLin, float2(0.5, 0.4), 9);
     float3 fill;
-    if (P24.y > 0.5) {
+    if (P24.y > 0.5 && src != 1) {
         fill = tSkyProbe.SampleLevel(sLin, d, (1 - gloss) * 6).rgb;   // (1.52: 64^2: 7 levels)
-        // 1.62: as bright as the sky the screen shows (our sky at dawn was brighter than the game's: white reflections
-        // early in the morning): the seen panorama's mean over the probe's, near the horizon all round
-        float4 seen = tSkyPano.SampleLevel(sLin, float2(0.5, 0.4), 9);
+        // 1.62 / 1.67: as the sky the screen shows (the probe is the sky's own draw, before our dusk / night darkening and
+        // the haze): per colour channel, the seen panorama's mean over the probe's near the horizon; a black probe (night):
+        // the seen sky's mean. ReflSkyMatch: how much.
         float3 pm = (tSkyProbe.SampleLevel(sLin, float3(1, 0.15, 0), 6).rgb + tSkyProbe.SampleLevel(sLin, float3(-1, 0.15, 0), 6).rgb
                    + tSkyProbe.SampleLevel(sLin, float3(0, 0.15, 1), 6).rgb + tSkyProbe.SampleLevel(sLin, float3(0, 0.15, -1), 6).rgb) * 0.25;
-        if (seen.a > 0.05 && Lum(pm) > 1e-4) fill *= clamp(Lum(seen.rgb / seen.a * P23.z) / Lum(pm), 0.2, 1.2);
+        // (1.67b: from 0.5 % of the panorama seen: at dawn / dusk little of it is (it was 5 %: the probe then went in as
+        // drawn: bright orange clouds over a dark sky, the wet ground lit by them); never brighter than the seen sky)
+        if (src != 3 && seen.a > 0.005) {
+            float3 sAvg = seen.rgb / seen.a * L;
+            float3 matched = Lum(pm) > 1e-4 ? fill * clamp(sAvg / max(pm, 1e-5), 0.02, 1.0) : sAvg;
+            fill = lerp(fill, matched, saturate(P26.z));
+        }
     }
     else {
         float4 f = tSkyPano.SampleLevel(sLin, float2(uv.x, 0.4), 7);
         float3 guess = SkyGuess(d) * 0.5;   // (never seen: 1.41's guess was far brighter than the game's dark dawn sky: white)
-        fill = f.a > 1e-3 ? lerp(guess, f.rgb / f.a * P23.z, saturate(f.a * 4)) : guess;
+        fill = f.a > 1e-3 ? lerp(guess, f.rgb / f.a * L, saturate(f.a * 4)) : guess;
     }
-    return c.a > 1e-3 ? lerp(fill, c.rgb / c.a * P23.z, saturate(c.a * 1.5)) : fill;
+    float3 r = src >= 2 ? fill : (c.a > 1e-3 ? lerp(fill, c.rgb / c.a * L, saturate(c.a * 1.5)) : fill);
+    return r * P26.x;
+}
+
+// 1.70: the cars as boxes for the reflections (their bodies: 1.9 x 4.6 x 1.2 m over the road): a floor's ray that
+// leaves the screen or reaches the sky but passes through one sees that car's dark side / underside, not the sky (a car
+// seen from above had no image in the puddle around it: its underside is never on the screen). Distance along the ray,
+// or 1e9.
+float RayCars(float3 o, float3 d)
+{
+    float best = 1e9;
+    [loop] for (int k = 0; k < (int)RN1.z; ++k) {
+        float3 P = RC[k * 3].xyz, ax = RC[k * 3 + 1].xyz, az = RC[k * 3 + 2].xyz;
+        float3 l = o - P;
+        float3 lo = float3(dot(l, ax), l.y, dot(l, az)), ld = float3(dot(d, ax), d.y, dot(d, az));
+        float3 mn = float3(-1.1, -0.7, -2.5), mx = float3(1.1, 1.4, 2.5);   // (1.70b: from below its place: it may be the body's middle)
+        float3 inv = 1 / (abs(ld) > 1e-5 ? ld : 1e-5);
+        float3 t0 = (mn - lo) * inv, t1 = (mx - lo) * inv;
+        float tn = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+        float tf = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+        if (tf >= max(tn, 0)) best = min(best, max(tn, 0));
+    }
+    return best;
 }
 
 float4 SsrRay(PSIn i, inout float gl, inout float th)
@@ -2027,6 +2172,8 @@ float4 SsrRay(PSIn i, inout float gl, inout float th)
     float puddle, covered, pGloss, pWater;
     float3 alb = tDiffuse.SampleLevel(sLin, i.t0.xy, 0).rgb;
     float wet = Wetness(rel, WetUp(n, gN), i.t1, X, Y, dd, i.pos.xy, alb, rel + tCamPrev.Load(int3(3, 0, 0)).xyz, puddle, covered, pGloss, pWater);
+    // 1.70: nothing on a car is wet road (a tyre's top under its arch shone with the sky like a puddle); its paint has its own
+    { float onCarW = OnCar(rel + tCamPrev.Load(int3(3, 0, 0)).xyz); wet *= 1 - onCarW; puddle *= 1 - onCarW; }
     float wet01 = saturate(max(wet, puddle)), wetVis = smoothstep(0, 0.8, wet01);   // (1.40: as wet as WetGround says; puddles on their own)
     // wet asphalt is rough (it reflects a blurred sky: no cloud shapes in it); puddles are mirrors
     float glossDry = lerp(N.w, min(N.w, 0.45), covered);
@@ -2050,36 +2197,47 @@ float4 SsrRay(PSIn i, inout float gl, inout float th)
     float prevT = 0, tHit = maxT, tHide = 1e9;   // (1.52: tHide: where it first went behind something, unseen thickness)
     bool hit = false, lastSky = false;
     float2 uvr = -1;
-    [loop] for (int s = 1; s <= 28; ++s) {
-        float f = (s - 1 + jit) / 28.0 + 0.5 / 28.0;
-        float t = maxT * f * f;
-        float3 q = start + Rv * t;
-        float2 dp; float4 rayAt;
-        if (!Project(q, i.t1, X, Y, dd, dp, rayAt)) break;
-        float2 uv = (i.pos.xy + dp) / Size.xy;
-        if (any(uv < 0) || any(uv > 1)) break;
-        float z = tDepth.SampleLevel(sPoint, uv, 0).x - rayAt.w;
-        uvr = uv;
-        if (abs(z) < 1e-9) { lastSky = true; prevT = t; continue; }
-        lastSky = false;
-        float diff = length(q) - length(rayAt.xyz / z);
-        if (diff > 0 && diff < 0.3 + t * 0.08 + (t - prevT) * 1.2) {   // (1.40: + the step: long rays stepped through facades)
-            float a = prevT, b = t;
-            [unroll] for (int r = 0; r < 4; ++r) {
-                float m = (a + b) * 0.5;
-                float3 qm = start + Rv * m;
-                float2 dpm; float4 ra;
-                Project(qm, i.t1, X, Y, dd, dpm, ra);
-                float2 uvm = (i.pos.xy + dpm) / Size.xy;
-                float zm = tDepth.SampleLevel(sPoint, uvm, 0).x - ra.w;
-                float dm = abs(zm) < 1e-9 ? -1 : length(qm) - length(ra.xyz / zm);
-                if (dm > 0) { b = m; uvr = uvm; } else a = m;
+    // (1.65: 7 groups of 4 steps, each group's depth read together, then looked at in order; the first hit refined)
+    RayProj rp = ProjSetup(start, Rv, i.t1, X, Y, dd);
+    bool done = false;
+    float ha = 0, hb = 0;
+    [loop] for (int g = 0; g < 7; ++g) {
+        [unroll] for (int k = 0; k < 4; ++k) {
+            float f = (g * 4 + k + jit) / 28.0 + 0.5 / 28.0;
+            float t = maxT * f * f;
+            float2 dp; float4 rayAt;
+            bool ok = ProjAt(rp, t, i.t1, X, Y, dp, rayAt);
+            float2 uv = (i.pos.xy + dp) / Size.xy;
+            ok = ok && all(uv >= 0) && all(uv <= 1);
+            float z = tDepth.SampleLevel(sPoint, uv, 0).x - rayAt.w;
+            float diff = length(start + Rv * t) - length(rayAt.xyz / z);
+            if (!done) {
+                if (!ok) done = true;
+                else {
+                    uvr = uv;
+                    if (abs(z) < 1e-9) { lastSky = true; prevT = t; }
+                    else {
+                        lastSky = false;
+                        if (diff > 0 && diff < 0.3 + t * 0.08 + (t - prevT) * 1.2) { hit = true; ha = prevT; hb = t; done = true; }   // (1.40: + the step: long rays stepped through facades)
+                        else { if (diff > 0) tHide = min(tHide, t); prevT = t; }
+                    }
+                }
             }
-            hit = true; tHit = b;
-            break;
         }
-        if (diff > 0) tHide = min(tHide, t);
-        prevT = t;
+        if (done) break;
+    }
+    if (hit) {
+        float a = ha, b = hb;
+        [unroll] for (int r = 0; r < 4; ++r) {
+            float m = (a + b) * 0.5;
+            float2 dpm; float4 ra;
+            ProjAt(rp, m, i.t1, X, Y, dpm, ra);
+            float2 uvm = (i.pos.xy + dpm) / Size.xy;
+            float zm = tDepth.SampleLevel(sPoint, uvm, 0).x - ra.w;
+            float dm = abs(zm) < 1e-9 ? -1 : length(start + Rv * m) - length(ra.xyz / zm);
+            if (dm > 0) { b = m; uvr = uvm; } else a = m;
+        }
+        tHit = b;
     }
     // 1.39: off the screen or into the sky: our sky as seen (the panorama), not nothing / the screen's edge
     bool pano = P21.x > 0.5;
@@ -2090,6 +2248,8 @@ float4 SsrRay(PSIn i, inout float gl, inout float th)
     // the screen: they went black)
     float3 wpos = rel + tCamPrev.Load(int3(3, 0, 0)).xyz;
     sky *= lerp(1, saturate(tHide / 5 - 0.2), saturate((gN.y - 0.6) * 4));   // (1.62: under cars again: the road there lay in their box)
+    float tCar = gN.y > 0.6 && OnCar(wpos) < 0.5 ? RayCars(wpos + n * 0.03, Rv) : 1e9;   // (1.70: a car's box on the way: its dark body)
+    if (!hit && tCar < 25) sky *= 0.08;
     gl = gloss; th = hit ? tHit : 1000;   // (1.46: on their own target, for the smoothing and the history)
     if (!hit && (!lastSky || pano)) return float4(sky, dist);
     float2 e = min(uvr, 1 - uvr);
@@ -2099,7 +2259,7 @@ float4 SsrRay(PSIn i, inout float gl, inout float th)
     // sharp ones from the full-size frame, blurred ones from the half-size copy's levels
     float3 col = mip < 1 ? lerp(tScene.SampleLevel(sLin, uvr, 0).rgb, tRefl.SampleLevel(sLin, uvr, 0).rgb, mip)
                          : tRefl.SampleLevel(sLin, uvr, mip - 1).rgb;
-    return float4(lerp(sky, col, conf), dist);
+    return float4(lerp(sky, col, conf) * (tCar < tHit ? 0.08 : 1), dist);   // (1.70b: a far bright hit behind a car's box: the car)
 }
 // 1.46: + the gloss and the ray's length, on a second target
 struct SsrRayOut { float4 c : SV_Target0; float2 a : SV_Target1; };
@@ -2122,6 +2282,7 @@ SsrRayOut PS_SSR(PSIn i)
 // camera; the old value used only from the same surface (its point on this one's plane) and held within this frame's
 // neighbourhood (clipped toward its mean, within its spread x SsrClip: no ghosts, no trails).
 // (1.42 .. 1.45: the gloss rode on w, x 1e5: past FP16's 65504: there was no history at all and no depth-aware weights)
+float3 Med3(float3 a, float3 b, float3 c) { return max(min(a, b), min(max(a, b), c)); }
 float3 HistCR(float2 uv)   // Catmull-Rom from 5 bilinear taps (the corners left out): resampled each frame, not blurred
 {
     float2 sp = uv * Size.xy, t1 = floor(sp - 0.5) + 0.5, f = sp - t1;
@@ -2183,6 +2344,14 @@ float4 PS_SSRBlur(PSIn i) : SV_Target0
     float3 blur = acc / ws, own = min(c.rgb, hi);
     // 1.60: a lone bright texel (a LED caught by one jittered ray) held to its neighbours' brightest x 2
     { float3 nb = 0; [unroll] for (int q = 0; q < 9; ++q) if (q != 4) nb = max(nb, hs[q].rgb); own = min(own, nb * 2 + 0.02); }
+    // 1.70 (in place of 1.69's floor): a texel far from the median of its 3x3 (dark or bright: a ray that hit a wrong spot:
+    // black dots on paint, lamp glass, puddles) takes that median (median of the rows' medians: edges kept)
+    {
+        float3 r0 = Med3(hs[0].rgb, hs[1].rgb, hs[2].rgb), r1 = Med3(hs[3].rgb, hs[4].rgb, hs[5].rgb), r2 = Med3(hs[6].rgb, hs[7].rgb, hs[8].rgb);
+        float3 md = Med3(r0, r1, r2);
+        float lo = Lum(own), lm = Lum(md);
+        if (lo < lm * 0.5 || lo > lm * 2 + 0.05) own = md;
+    }
     float3 r = lerp(blur, own, sharp);
     float dd = depth - i.t1.w;
     if (P12.w > 0.5 && cd < 5e4 && abs(dd) > 1e-9) {
@@ -2238,6 +2407,8 @@ SsrOut PS_SSRApply(PSIn i)
     float puddle, covered, pGloss, pWater;
     float3 alb = tDiffuse.SampleLevel(sLin, i.t0.xy, 0).rgb;
     float wet = Wetness(rel, WetUp(n, gN), i.t1, X, Y, dd, i.pos.xy, alb, rel + tCamPrev.Load(int3(3, 0, 0)).xyz, puddle, covered, pGloss, pWater);
+    // 1.70: nothing on a car is wet road (a tyre's top under its arch shone with the sky like a puddle); its paint has its own
+    { float onCarW = OnCar(rel + tCamPrev.Load(int3(3, 0, 0)).xyz); wet *= 1 - onCarW; puddle *= 1 - onCarW; }
     float wet01 = saturate(max(wet, puddle)), wetVis = smoothstep(0, 0.8, wet01);   // (1.40: as wet as WetGround says; puddles on their own)
     // wet asphalt is rough (it reflects a blurred sky: no cloud shapes in it); puddles are mirrors
     float glossDry = lerp(N.w, min(N.w, 0.45), covered);
@@ -2262,14 +2433,19 @@ SsrOut PS_SSRApply(PSIn i)
     int2 hmax = int2(P13.zw) - 1;
     float4 r = 0;
     float rw = 0, best = 1e9;
-    [unroll] for (int k = 0; k < 4; ++k) {
-        int2 o2 = int2(k & 1, k >> 1);
+    // 1.71: a 4x4 window (the 4 nearest by place, the ring around them a little), each by how well its distance fits this
+    // pixel's (sharp: another surface counts for almost nothing): on a thin thing (a pole, a window frame) none of the 4
+    // nearest may be its own: they took the background's reflection (a 1-pixel outline); the ring may have its own
+    [unroll] for (int k = 0; k < 16; ++k) {
+        int2 o2 = int2(k & 3, k >> 2) - 1;
         float4 h = tSsr.Load(int3(clamp(b0 + o2, 0, hmax), 0));
-        float wb = (o2.x ? fq.x : 1 - fq.x) * (o2.y ? fq.y : 1 - fq.y);
-        float wd = 1 / (1e-3 + abs(h.w - dist) / (dist * 0.02 + 0.05));
-        best = min(best, abs(h.w - dist) / (dist * 0.02 + 0.05));
-        r += h * (wb * wd + 1e-5);
-        rw += wb * wd + 1e-5;
+        bool inner = all(o2 >= 0) && all(o2 <= 1);
+        float wb = inner ? (o2.x ? fq.x : 1 - fq.x) * (o2.y ? fq.y : 1 - fq.y) + 0.05 : 0.02;
+        float df = abs(h.w - dist) / (dist * 0.02 + 0.05);
+        float wd = exp2(-df * 3);
+        best = min(best, df);
+        r += h * (wb * wd + 1e-7);
+        rw += wb * wd + 1e-7;
     }
     r /= rw;
     float match = saturate(2 - best);   // 1.60: none of its texels is this surface (an edge: a white outline round cars)
@@ -2349,11 +2525,23 @@ SamplerComparisonState sHlCmp : register(s14);
 // spot's frustum, each lit by the pattern, the game's attenuation and its shadow map (a car ahead cuts the beam).
 float3 HeadlightBeam(float3 Vd, float T, float noise)
 {
+    // 1.65: the ray clipped to the spot's frustum first (in clip space every bound is linear along the ray): the samples
+    // all fall inside the beam (less noise for the same count) and a ray that misses it costs nothing
+    float4 c1 = Vd.x * HlM[0] + Vd.y * HlM[1] + Vd.z * HlM[2], c0 = HlM[3];   // clip(t) = c0 + c1 t
+    float ta = 0, tb = T;
+    float a[7] = { c0.w, c0.w - c0.x, c0.w + c0.x, c0.w - c0.y, c0.w + c0.y, c0.w - c0.z, c0.w + c0.z };
+    float b[7] = { c1.w, c1.w - c1.x, c1.w + c1.x, c1.w - c1.y, c1.w + c1.y, c1.w - c1.z, c1.w + c1.z };
+    [unroll] for (int k = 0; k < 7; ++k) {   // a + b t > 0
+        if (abs(b[k]) < 1e-9) { if (a[k] <= 0) tb = -1; }
+        else if (b[k] > 0) ta = max(ta, -a[k] / b[k]);
+        else tb = min(tb, -a[k] / b[k]);
+    }
+    if (tb <= ta) return 0;
     float3 sum = 0;
     [loop] for (int s = 0; s < 20; ++s) {
-        float t = (s + noise) / 20 * T;
+        float t = ta + (s + noise) / 20 * (tb - ta);
         float3 P = Vd * t;
-        float4 c = P.x * HlM[0] + P.y * HlM[1] + P.z * HlM[2] + HlM[3];
+        float4 c = c0 + c1 * t;
         if (c.w <= 0 || any(abs(c.xyz) >= c.w)) continue;
         float3 q = c.xyz / c.w;
         float2 uv = q.xy * 0.5 + 0.5;
@@ -2365,7 +2553,7 @@ float3 HeadlightBeam(float3 Vd, float T, float noise)
         att /= 1 + d2 / (P15.z * P15.z);   // in the air the beam spreads and fades with distance (the game's is almost flat)
         sum += pat * sh * att;
     }
-    return sum * HlCol.rgb * (T / 20) * P15.x * 0.0005;
+    return sum * HlCol.rgb * ((tb - ta) / 20) * P15.x * 0.0005;
 }
 
 // ---- the lamps' final buffer (lamp-fix pass: one texel per lamp entry, into the buffer t33 is read from): the CPU's
@@ -2694,12 +2882,79 @@ cbuffer GradeCB : register(b12)
 float3 ToLin(float3 c) { return pow(max(c, 0), 2.2); }
 float3 ToDisp(float3 c) { return pow(saturate(c), 1 / 2.2); }
 
+// 1.68 (AntiAliasing): FXAA 3.11 (Lottes, NVIDIA), quality preset with 8 search steps, on the game's finished picture
+// (display-encoded, as FXAA wants): the edge's direction from the 3x3 lumas, its ends searched along it, the pixel moved
+// across it by how far it is from the nearer end; plus a sub-pixel blend (Gr5.w - 1: AASoftness) for detail inside
+// textures. One pass, ~0.3 ms at 1440p against the game's own (twice the pixels rendered).
+float FxLuma(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }
+float FxL(float2 uv) { return FxLuma(tText.SampleLevel(sText, uv, 0).rgb); }
+float3 Fxaa(float2 uv, float2 rcpF, float subpix)
+{
+    float3 rgbM = tText.SampleLevel(sText, uv, 0).rgb;
+    float lM = FxLuma(rgbM);
+    float lN = FxL(uv + float2(0, -rcpF.y)), lS = FxL(uv + float2(0, rcpF.y)), lW = FxL(uv + float2(-rcpF.x, 0)), lE = FxL(uv + float2(rcpF.x, 0));
+    float mx = max(max(lN, lS), max(lW, max(lE, lM))), mn = min(min(lN, lS), min(lW, min(lE, lM)));
+    float range = mx - mn;
+    if (range < max(0.0312, mx * 0.125)) return rgbM;
+    float lNW = FxL(uv - rcpF), lSE = FxL(uv + rcpF), lNE = FxL(uv + float2(rcpF.x, -rcpF.y)), lSW = FxL(uv + float2(-rcpF.x, rcpF.y));
+    float lNS = lN + lS, lWE = lW + lE;
+    float subpixNSWE = lNS + lWE;
+    float edgeHorz1 = -2 * lM + lNS, edgeVert1 = -2 * lM + lWE;
+    float lNESE = lNE + lSE, lNWNE = lNW + lNE;
+    float edgeHorz2 = -2 * lE + lNESE, edgeVert2 = -2 * lN + lNWNE;
+    float lNWSW = lNW + lSW, lSWSE = lSW + lSE;
+    float edgeHorz4 = abs(edgeHorz1) * 2 + abs(edgeHorz2), edgeVert4 = abs(edgeVert1) * 2 + abs(edgeVert2);
+    float edgeHorz3 = -2 * lW + lNWSW, edgeVert3 = -2 * lS + lSWSE;
+    float edgeHorz = abs(edgeHorz3) + edgeHorz4, edgeVert = abs(edgeVert3) + edgeVert4;
+    float subpixNWSWNESE = lNWSW + lNESE;
+    float lengthSign = rcpF.x;
+    bool horzSpan = edgeHorz >= edgeVert;
+    float subpixA = subpixNSWE * 2 + subpixNWSWNESE;
+    if (!horzSpan) { lN = lW; lS = lE; }
+    else lengthSign = rcpF.y;
+    float subpixB = subpixA / 12 - lM;
+    float gradientN = lN - lM, gradientS = lS - lM;
+    float lNN = lN + lM, lSS = lS + lM;
+    bool pairN = abs(gradientN) >= abs(gradientS);
+    float gradient = max(abs(gradientN), abs(gradientS));
+    if (pairN) lengthSign = -lengthSign;
+    float subpixC = saturate(abs(subpixB) / range);
+    float2 posB = uv;
+    float2 offNP = horzSpan ? float2(rcpF.x, 0) : float2(0, rcpF.y);
+    if (!horzSpan) posB.x += lengthSign * 0.5; else posB.y += lengthSign * 0.5;
+    float2 posN = posB - offNP, posP = posB + offNP;
+    float subpixD = -2 * subpixC + 3, subpixE = subpixC * subpixC;
+    if (!pairN) lNN = lSS;
+    float gradientScaled = gradient * 0.25;
+    float lMM = lM - lNN * 0.5;
+    float subpixF = subpixD * subpixE;
+    bool lMLTZero = lMM < 0;
+    float lEndN = FxL(posN) - lNN * 0.5, lEndP = FxL(posP) - lNN * 0.5;
+    bool doneN = abs(lEndN) >= gradientScaled, doneP = abs(lEndP) >= gradientScaled;
+    static const float kStep[7] = { 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0 };
+    [loop] for (int k = 0; k < 7 && !(doneN && doneP); ++k) {
+        if (!doneN) { posN -= offNP * kStep[k]; lEndN = FxL(posN) - lNN * 0.5; doneN = abs(lEndN) >= gradientScaled; }
+        if (!doneP) { posP += offNP * kStep[k]; lEndP = FxL(posP) - lNN * 0.5; doneP = abs(lEndP) >= gradientScaled; }
+    }
+    float dstN = horzSpan ? uv.x - posN.x : uv.y - posN.y, dstP = horzSpan ? posP.x - uv.x : posP.y - uv.y;
+    bool goodSpanN = (lEndN < 0) != lMLTZero, goodSpanP = (lEndP < 0) != lMLTZero;
+    bool directionN = dstN < dstP;
+    float dst = min(dstN, dstP);
+    bool goodSpan = directionN ? goodSpanN : goodSpanP;
+    float pixelOffset = dst * (-1 / (dstP + dstN)) + 0.5;
+    float subpixH = subpixF * subpixF * subpix;
+    float off = max(goodSpan ? pixelOffset : 0, subpixH);
+    float2 posM = uv;
+    if (!horzSpan) posM.x += off * lengthSign; else posM.y += off * lengthSign;
+    return tText.SampleLevel(sText, posM, 0).rgb;
+}
+
 float4 PS_Grade(VSOut i) : SV_Target
 {
     float2 uv = i.uv;
     float4 src = tText.SampleLevel(sText, uv, 0);
     if (Gr4.x > 0.5 && uv.x < 0.5) return src;
-    float3 c = src.rgb;
+    float3 c = Gr5.w > 0.5 ? Fxaa(uv, Gr3.zw, Gr5.w - 1) : src.rgb;   // 1.68: our anti-aliasing first
     // sharpening: AMD FidelityFX CAS (contrast adaptive, 3x3): strong where the neighbourhood is flat, little on hard
     // edges (no halos)
     if (Gr2.z > 0) {
@@ -2800,7 +3055,10 @@ float4 PS_Grade(VSOut i) : SV_Target
     // vignette
     float2 v = (uv - 0.5) * float2(1.0, 0.75);
     lin *= 1 - Gr2.w * smoothstep(0.1, 0.55, dot(v, v) * 2.0);
-    return float4(ToDisp(lin), src.a);
+    // 1.65: the 8-bit picture dithered: triangular noise of +-1 step (two uniform ones added) before it is rounded, so
+    // smooth gradients (the sky, haze, a lamp's falloff after the curves) show no bands; below what the eye sees
+    float tp = IgnStill(i.pos.xy) + IgnStill(i.pos.xy + float2(37.17, 11.83)) - 1;
+    return float4(ToDisp(lin) + tp / 255.0, src.a);
 }
 
 float4 PS_Overlay(VSOut i) : SV_Target

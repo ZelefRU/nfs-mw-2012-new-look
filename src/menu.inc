@@ -6,14 +6,14 @@ struct MenuGroup { const char* name; int items[40]; int n; };
 static const MenuGroup kGroups[] = {
     { "SUN & MOON", { 135, 138, 139, 140, 141, 142, 136, 9, 148, 14, 143, 137, 144, 153, 154, 155, 146, 147, 145 }, 19 },
     { "SHADOWS", { 113, 114, 3, 43, 11, 118, 4, 5, 119, 116, 115, 185, 186, 187, 133, 134, 117, 120, 12, 13, 0, 1, 2, 10 }, 23 },
-    { "AMBIENT & OCCLUSION", { 8, 38, 62, 63, 15, 6, 7 }, 7 },
+    { "AMBIENT & OCCLUSION", { 8, 38, 62, 63, 188, 15, 6, 7, 189, 190 }, 10 },
     { "AIR", { 16, 149, 150, 151, 152, 17, 70, 20, 18, 19, 68, 69 }, 12 },
     { "CAR LIGHTS", { 71, 74, 72, 73, 75, 77, 78, 79, 76, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90 }, 20 },
     { "SKY", { 91, 103, 93, 100, 101, 102, 99, 94, 95, 96, 104, 105, 92, 97, 98 }, 15 },
     { "MATERIALS (LIGHTING MODEL)", { 129, 130, 132, 131, 125, 128, 126, 127, 121, 122, 123, 124 }, 12 },
-    { "REFLECTIONS", { 64, 165, 166, 180, 109, 65, 175, 167, 112, 184, 182, 183, 177, 181, 178, 179, 110, 111, 66, 67 }, 20 },
+    { "REFLECTIONS", { 64, 165, 166, 180, 109, 65, 175, 167, 112, 184, 182, 183, 177, 181, 178, 179, 110, 111, 66, 67, 191, 192, 193, 194 }, 24 },
     { "NOISE / SPARKLE (find what makes it)", { 173, 168, 170, 176, 171, 169, 172, 174 }, 8 },
-    { "LOOK (COLOUR)", { 45, 61, 46, 47, 106, 48, 49, 50, 51, 107, 108, 52, 53, 54, 55, 56, 57, 58, 59, 60 }, 20 },
+    { "LOOK (COLOUR)", { 45, 61, 195, 196, 46, 47, 106, 48, 49, 50, 51, 107, 108, 52, 53, 54, 55, 56, 57, 58, 59, 60 }, 22 },
     { "BOUNCE LIGHT", { 21, 22, 24, 25 }, 4 },
     { "LAMPS", { 26, 164, 35, 44, 39, 40, 41, 42, 36, 37, 28, 29, 30, 33, 34, 27, 31, 32 }, 18 },
     { "LAMP GROUPS (the map's lamps by kind)", { 156, 157, 160, 158, 159, 161, 162, 163 }, 8 },
@@ -41,7 +41,9 @@ static const char* ChoiceText(int idx, float v)
     case P_SS_SKIP: return c ? "ON (only past ours)" : "OFF";
     case P_SUN_PATH: return !c ? "the game's (a loop)" : g_p[P_SS].v > 0.5f ? "ours (by the clock)" : "ours: needs SHADOWS > our shadow maps ON";
     case 187: return c <= 0 ? "OFF (all maps, as usual)" : c == 1 ? "only map 1 (red, near)" : c == 2 ? "only map 2 (green)" : c == 3 ? "only map 3 (blue)" : "only map 4 (yellow, far)";
-    case P_SUN_DEBUG: case P_SKY_NIGHT: case P_SSR_SKY: case P_LG + 7: case P_NOISE + 3: case P_SSR_EARLY: case 186: return c ? "ON" : "OFF";
+    case P_SUN_DEBUG: case P_SKY_NIGHT: case P_SSR_SKY: case P_LG + 7: case P_NOISE + 3: case P_SSR_EARLY: case 186: case 188: case 189: case 190: case 195: return c ? "ON" : "OFF";
+    case 192: return c <= 0 ? "auto (seen sky, the probe where unseen)" : c == 1 ? "seen sky only (its mean where unseen)" : c == 2 ? "probe only (matched)" : "probe only, as drawn (no matching)";
+    case 194: return c ? "ON (stored by the sky's level now)" : "OFF (as seen)";
     case P_NOISE: return c <= 0 ? "none (raw: the noise as it is)" : c == 1 ? "by gloss (puddles sharp)" : "always 3x3 (soft)";
     case P_LG + 1: return c ? "ON" : "OFF (not drawn: faster)";
     case P_LG: { static char b[96]; if (c >= 0 && c < g_presetCount) sprintf(b, "%s   (%d lamps)", g_presets[c].name, c < 32 ? g_groupLamps[c] : 0); else sprintf(b, "-"); return b; }
@@ -117,7 +119,7 @@ static void BuildMenu()
     g_mlN = 0;
     // ---- title
     MNew();
-    MSegAdd(C_TITLE, "NewLook 1.64   ");
+    MSegAdd(C_TITLE, "NewLook 1.71   ");
     MSegAdd(g_enabled ? C_ON : C_OFF, g_enabled ? "[ ON ]" : "[ OFF - the game's own picture ]");
     MSegAdd(C_DIM, "  Y      ");
     MSegAdd(C_TITLE, "view: ");

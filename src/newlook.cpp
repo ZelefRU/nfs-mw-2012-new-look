@@ -1,4 +1,4 @@
-// NewLook 1.64 - better sun shadows, AO, bounce light and air for Need for Speed: Most Wanted (2012).
+// NewLook 1.71 - better sun shadows, AO, bounce light and air for Need for Speed: Most Wanted (2012).
 //
 // An ASI plugin (loaded by the ASI loader of HD Effects, dinput8.dll), separate from DroneCam.
 // It hooks D3D11 through the vtables of a throw-away device: CreatePixelShader recognises the
@@ -242,6 +242,18 @@ static Param g_p[] = {
     { "ShadowSunStep", "Shadows: far maps drawn again as the sun moves (x the step; less: smoother, costs more)", 0.3f, 0.1f, 1.0f, 0.05f, 0 },
     { "ShadowCityMap", "Shadows: buildings out of the game's view still cast (the city's height map)", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
     { "ShadowOnly", "Shadows (test): only one of our maps everywhere it reaches (1 red near .. 4 yellow far), no help from the others", 0.0f, 0.0f, 4.0f, 1.0f, 0 },
+    { "SkyOcclusionCosine", "Sky occlusion: cosine-weighted (GTAO): low horizons darken less", 0.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "AOMultiBounce", "AO: light bounced in the corner (bright surfaces darken less)", 0.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "AOBitmask", "AO: visibility bitmask (thin posts, rails cast no solid shade)", 0.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "ReflSkyBright", "Reflected sky (off screen): brightness x", 1.0f, 0.0f, 3.0f, 0.05f, 0 },
+    { "ReflSkySource", "Reflected sky (off screen): source (debug)", 0.0f, 0.0f, 3.0f, 1.0f, 0 },
+    { "ReflSkyMatch", "Reflected sky: probe matched to the seen sky's colour", 1.0f, 0.0f, 1.0f, 0.05f, 0 },
+    { "ReflSkyLevel", "Reflected sky: the seen sky follows the sky's brightness", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "AntiAliasing", "Anti-aliasing: ours (FXAA 3.11, ~0.3 ms; the game's own off then)", 0.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "AASoftness", "Anti-aliasing: softness inside textures (0 sharp .. 1 soft)", 0.5f, 0.0f, 1.0f, 0.05f, 0 },
+    { "PaintClearCoat", "Car paint: clear coat (a sharp highlight over the colour)", 0.6f, 0.0f, 1.0f, 0.05f, 0 },
+    { "PaintSoft", "Car paint: the colour's own highlight soft (0 as the game .. 1 satin)", 0.4f, 0.0f, 1.0f, 0.05f, 0 },
+    { "PaintFlakes", "Car paint: metallic flakes (sparkle in the sun; the player's car)", 0.4f, 0.0f, 1.0f, 0.05f, 0 },
 };
 enum { P_BOUNCE = 21, P_BOUNCE_R = 22, P_FAST = 23, P_BOUNCE_ALL = 24, P_BOUNCE_HIST = 25, P_LAMP = 26, P_LAMP_THR = 27,
        P_LAMP_REACH = 28, P_LAMP_SRC = 29, P_LAMP_DAY = 30, P_LAMP_AUTO = 31, P_LAMP_POWER = 32, P_KNOCK = 33, P_AUTO_LAMPS = 34, P_LAMP_RADIUS = 35, P_LAMP_SHADOW = 36, P_LAMP_SHADOW_T = 37, P_NIGHT_AMB = 38, P_LAMP_SHADOW_MAPS = 39, P_LAMP_SIZE = 40, P_LAMP_SHADOW_BUDGET = 41, P_LAMP_SHADOW_CUT = 42, P_SOFT_SUN = 43, P_LAMP_RES = 44, P_LOOK = 45, P_LOOK_PRESET = 61, P_SKY_OCC = 62, P_SSR = 64, P_GLOW = 68, P_HL_BEAM = 71, P_HL_GAME = 72, P_HL_SOFT = 73, P_HL_LEN = 74, P_TRAFFIC = 75, P_TR_HEAD = 77, P_TR_TAIL = 81, P_TR_FIX = 85, P_SKY = 91, P_LOOK_X = 106, P_SS = 113, P_PBR = 121, P_REL = 125, P_POM = 129, P_SS_HALF = 133, P_SS_SKIP = 134, P_SUN_PATH = 135, P_SUN_FADE = 136, P_MOON_SHADOWS = 137,
@@ -340,28 +352,56 @@ static const char* PresetMemChanged(int idx, float before)   // a message, or 0
 
 static void SaveIni()
 {
+    // 1.65: the section written once: ~200 single writes each read and rewrote the whole file (a stall on H). Our keys
+    // replaced or added; any other line of the section kept.
+    struct KV { const char* k; char v[512]; };
+    static KV kv[kParams + 8];
+    int nk = 0;
+    auto put = [&](const char* k, const char* v) { kv[nk].k = k; strncpy(kv[nk].v, v, 511); kv[nk].v[511] = 0; ++nk; };
     char b[64];
-    WritePrivateProfileStringA("NewLook", "Enabled", g_enabled ? "1" : "0", g_iniPath);
-    WritePrivateProfileStringA("NewLook", "ShowOverlay", g_overlay ? "1" : "0", g_iniPath);
+    put("Enabled", g_enabled ? "1" : "0");
+    put("ShowOverlay", g_overlay ? "1" : "0");
     sprintf(b, "%d", g_view);
-    WritePrivateProfileStringA("NewLook", "View", b, g_iniPath);
-    for (int i = 0; i < kParams; ++i) {
-        sprintf(b, "%.3f", g_p[i].v);
-        WritePrivateProfileStringA("NewLook", g_p[i].key, b, g_iniPath);
-    }
+    put("View", b);
+    for (int i = 0; i < kParams; ++i) { sprintf(b, "%.3f", g_p[i].v); put(g_p[i].key, b); }
     for (int s = 0; s < 2; ++s) {
         PresetMemory& m = g_presetMem[s];
         if (g_p[m.preset].v < 0.5f) PresetMemSave(m);   // custom now: these are its values
         if (!m.has) continue;
         char lb[512] = "";
         for (int i = 0; i < m.n; ++i) { char t[24]; sprintf(t, "%s%.3f", i ? " " : "", m.saved[i]); strcat(lb, t); }
-        WritePrivateProfileStringA("NewLook", m.key, lb, g_iniPath);
+        put(m.key, lb);
     }
     if (g_newLamp.valid) {
         sprintf(b, "%.4f %.4f %.4f %d", g_newLamp.c[0], g_newLamp.c[1], g_newLamp.c[2], g_newLamp.group);
-        WritePrivateProfileStringA("NewLook", "NewLamp", b, g_iniPath);
+        put("NewLamp", b);
     }
-    Log("settings saved");
+    static char cur[65536], out[65536];
+    bool used[kParams + 8] = {};
+    DWORD got = GetPrivateProfileSectionA("NewLook", cur, sizeof(cur) - 2, g_iniPath);
+    cur[got] = cur[got + 1] = 0;
+    char* o = out;
+    size_t left = sizeof(out) - 2;
+    auto add = [&](const char* line) { size_t l = strlen(line) + 1; if (l <= left) { memcpy(o, line, l); o += l; left -= l; } };
+    for (const char* line = cur; *line; line += strlen(line) + 1) {
+        const char* eq = strchr(line, '=');
+        int f = -1;
+        if (eq) for (int i = 0; i < nk && f < 0; ++i) if (!used[i] && strlen(kv[i].k) == (size_t)(eq - line) && !_strnicmp(line, kv[i].k, eq - line)) f = i;
+        if (f < 0) { add(line); continue; }
+        used[f] = true;
+        char t[600];
+        _snprintf(t, sizeof(t) - 1, "%s=%s", kv[f].k, kv[f].v); t[sizeof(t) - 1] = 0;
+        add(t);
+    }
+    for (int i = 0; i < nk; ++i) {
+        if (used[i]) continue;
+        char t[600];
+        _snprintf(t, sizeof(t) - 1, "%s=%s", kv[i].k, kv[i].v); t[sizeof(t) - 1] = 0;
+        add(t);
+    }
+    *o = 0;
+    if (!WritePrivateProfileSectionA("NewLook", out, g_iniPath)) Log("settings: the ini could not be written");
+    else Log("settings saved");
 }
 
 // ---------------------------------------------------------------- d3dcompiler
@@ -816,22 +856,24 @@ static HalfRT g_ssrAux;                    // 1.46: the raw ones' gloss and ray 
 static UINT g_ssrW, g_ssrH;
    // frame each one was written (+1, 0 = never)
 
-static bool MakeRT(HalfRT& r, UINT w, UINT h, DXGI_FORMAT f, bool mips)
-{
-    D3D11_TEXTURE2D_DESC d = {};
-    d.Width = w; d.Height = h; d.MipLevels = mips ? 0 : 1; d.ArraySize = 1; d.Format = f;
-    d.SampleDesc.Count = 1; d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    d.MiscFlags = mips ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0;
-    return SUCCEEDED(g_dev->CreateTexture2D(&d, 0, &r.t)) && SUCCEEDED(g_dev->CreateRenderTargetView(r.t, 0, &r.rtv)) &&
-           SUCCEEDED(g_dev->CreateShaderResourceView(r.t, 0, &r.srv));
-}
-
 static void FreeRT(HalfRT& r)
 {
     if (r.srv) r.srv->Release();
     if (r.rtv) r.rtv->Release();
     if (r.t) r.t->Release();
     memset(&r, 0, sizeof(r));
+}
+
+static bool MakeRT(HalfRT& r, UINT w, UINT h, DXGI_FORMAT f, bool mips)
+{
+    D3D11_TEXTURE2D_DESC d = {};
+    d.Width = w; d.Height = h; d.MipLevels = mips ? 0 : 1; d.ArraySize = 1; d.Format = f;
+    d.SampleDesc.Count = 1; d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    d.MiscFlags = mips ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0;
+    if (SUCCEEDED(g_dev->CreateTexture2D(&d, 0, &r.t)) && SUCCEEDED(g_dev->CreateRenderTargetView(r.t, 0, &r.rtv)) &&
+        SUCCEEDED(g_dev->CreateShaderResourceView(r.t, 0, &r.srv))) return true;
+    FreeRT(r);   // (1.65: no half-made target left: its texture was kept, and a retry leaked it)
+    return false;
 }
 
 static bool EnsureLampLT(UINT w, UINT h)
@@ -868,12 +910,14 @@ static bool EnsureTiles(UINT rtW, UINT rtH)
 static bool EnsureSsrRT(UINT w, UINT h)
 {
     if (g_ssrRT[2].srv && g_ssrAux.srv && g_ssrW == w && g_ssrH == h) return true;
+    static UINT failW, failH;   // (1.65: a size that failed is not tried (and logged) again every frame)
+    if (failW == w && failH == h) return false;
     for (int k = 0; k < 3; ++k) FreeRT(g_ssrRT[k]);
     FreeRT(g_ssrAux);
     g_ssrFrame[0] = g_ssrFrame[1] = 0;
     for (int k = 0; k < 3; ++k)
-        if (!MakeRT(g_ssrRT[k], w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, false)) { Log("reflection targets failed"); g_ssrW = 0; return false; }
-    if (!MakeRT(g_ssrAux, w, h, DXGI_FORMAT_R16G16_FLOAT, false)) { Log("reflection targets failed"); g_ssrW = 0; return false; }
+        if (!MakeRT(g_ssrRT[k], w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, false)) { Log("reflection targets failed"); g_ssrW = 0; failW = w; failH = h; return false; }
+    if (!MakeRT(g_ssrAux, w, h, DXGI_FORMAT_R16G16_FLOAT, false)) { Log("reflection targets failed"); g_ssrW = 0; failW = w; failH = h; return false; }
     g_ssrW = w; g_ssrH = h;
     Log("reflection targets %ux%u", w, h);
     return true;
@@ -1222,6 +1266,32 @@ static int MapNearest(const float* p, float maxD)
     int best = -1;
     float bd = maxD * maxD;
     for (int i = 0; i < g_mapCount; ++i) { float d = Dist2(g_map[i].p, p); if (d < bd) { bd = d; best = i; } }
+    return best;
+}
+// 1.65: the map lamps by 4 m cells, made again at every upload: "a map lamp within 2.5 m?" for every found lamp, twice a
+// frame, was a scan of the whole map (4000 lamps: ~800k distances a frame). For radii up to 4 m.
+static const int kMapGrid = 4096;
+static int g_mapGridHead[kMapGrid], g_mapGridNext[kMaxMap];
+static unsigned MapCell(int x, int y, int z) { return ((unsigned)x * 73856093u ^ (unsigned)y * 19349663u ^ (unsigned)z * 83492791u) & (kMapGrid - 1); }
+static void MapGridBuild()
+{
+    memset(g_mapGridHead, 0xff, sizeof(g_mapGridHead));
+    for (int i = 0; i < g_mapCount; ++i) {
+        unsigned c = MapCell((int)floorf(g_map[i].p[0] * 0.25f), (int)floorf(g_map[i].p[1] * 0.25f), (int)floorf(g_map[i].p[2] * 0.25f));
+        g_mapGridNext[i] = g_mapGridHead[c];
+        g_mapGridHead[c] = i;
+    }
+}
+static int MapNearestGrid(const float* p, float maxD)
+{
+    int best = -1;
+    float bd = maxD * maxD;
+    int cx = (int)floorf(p[0] * 0.25f), cy = (int)floorf(p[1] * 0.25f), cz = (int)floorf(p[2] * 0.25f);
+    for (int dx = -1; dx <= 1; ++dx) for (int dy = -1; dy <= 1; ++dy) for (int dz = -1; dz <= 1; ++dz)
+        for (int i = g_mapGridHead[MapCell(cx + dx, cy + dy, cz + dz)]; i >= 0; i = g_mapGridNext[i]) {
+            float d = Dist2(g_map[i].p, p);
+            if (d < bd || (d == bd && best >= 0 && i < best)) { bd = d; best = i; }   // (ties: the lowest index, as the scan)
+        }
     return best;
 }
 
@@ -1784,6 +1854,7 @@ static int LampsUpload(ID3D11DeviceContext* ctx)
     cap = cap < 8 ? 8 : cap > kLampsUp ? kLampsUp : cap;
     LampGroupSync();
     PropTick();
+    MapGridBuild();
     if (g_camKnown) {
         float radius = g_p[P_LAMP_RADIUS].v;
         float reach = g_p[P_LAMP_REACH].v + radius;
@@ -1811,7 +1882,7 @@ static int LampsUpload(ID3D11DeviceContext* ctx)
             else {
                 const Lamp& L = g_lamps[src >= 1 ? i - g_mapCount : i];
                 if (L.hits < 3) continue;   // seen a few times: not a passing glint
-                if (src == 1 && MapNearest(L.p, 2.5f) >= 0) continue;
+                if (src == 1 && MapNearestGrid(L.p, 2.5f) >= 0) continue;
                 pp = L.p;
                 float fade = L.hits < 8 ? L.hits / 8.0f : 1.0f;
                 for (int j = 0; j < 3; ++j) col[j] = L.c[j] * fade;
@@ -1908,7 +1979,7 @@ static int LampsUpload(ID3D11DeviceContext* ctx)
         for (int i = 0; i < g_mapCount + g_lampCount; ++i) {
             bool isMap = i < g_mapCount;
             const float* pp = isMap ? g_map[i].p : g_lamps[i - g_mapCount].p;
-            if (!isMap && (g_lamps[i - g_mapCount].hits < 3 || MapNearest(pp, 2.0f) >= 0)) continue;   // already in the map
+            if (!isMap && (g_lamps[i - g_mapCount].hits < 3 || MapNearestGrid(pp, 2.0f) >= 0)) continue;   // already in the map
             float u, v;
             if (!ProjectUV(pp, &u, &v)) continue;
             float dx = (u - g_mouseU) * g_clientW, dy = (v - g_mouseV) * g_clientH, d = sqrtf(dx * dx + dy * dy);
@@ -1967,6 +2038,9 @@ struct LightCB {
     float P21[4];           // 1.39: x = our sky's panorama for the reflections (t67)
     float P22[4], P23[4];   // 1.43: noise settings (spec AA, wet bumps, dots cut, smoothing; history)
     float P24[4];           // 1.46: the reflections' history clip; the sky probe ready (t68)
+    float P25[4];           // 1.66: sky occlusion cosine-weighted, AO multi-bounce, AO bitmask (options to compare)
+    float P26[4];           // 1.67: the reflected sky: brightness, source, the probe's colour match, the seen sky by the level
+    float P27[4];           // 1.70: car paint: clear coat, soft base highlight, metallic flakes
 };
 
 static const char* CloudCommonSrc();
@@ -3095,6 +3169,9 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
         cb.P22[0] = g_p[P_NOISE + 5].v; cb.P22[1] = g_p[P_NOISE + 4].v; cb.P22[2] = g_p[P_NOISE + 1].v; cb.P22[3] = g_p[P_NOISE].v;
         cb.P23[0] = g_p[P_NOISE + 2].v; cb.P23[1] = g_p[P_NOISE + 7].v;
         cb.P24[0] = g_p[P_NOISE + 8].v;   // 1.46: the history's clip; the sky probe drawn of late (sky.inc)
+        cb.P25[0] = g_p[188].v; cb.P25[1] = g_p[189].v; cb.P25[2] = g_p[190].v;   // 1.66: the AO options
+        cb.P26[0] = g_p[191].v; cb.P26[1] = g_p[192].v; cb.P26[2] = g_p[193].v; cb.P26[3] = g_p[194].v;   // 1.67: the reflected sky
+        cb.P27[0] = g_p[197].v; cb.P27[1] = g_p[198].v; cb.P27[2] = g_p[199].v;   // 1.70: car paint
         cb.P24[1] = g_probeSrv && g_probeFrame && g_frame + 1 - g_probeFrame < 120 ? 1.0f : 0.0f;
         {   // 1.41: the sky panorama's fading this frame (~8 s half)
             static LARGE_INTEGER lastQ; LARGE_INTEGER q; QueryPerformanceCounter(&q);
@@ -3394,9 +3471,50 @@ static void STDMETHODCALLTYPE HkPSSetShader(ID3D11DeviceContext* ctx, ID3D11Pixe
     oPSSetShader(ctx, SkySubstitute(ctx, g_lightPSN ? HlSubstitute(ctx, use) : use), ci, n);   // the headlights: ours with a soft shadow
 }
 
+// 1.65: asked ~15 times a game draw: the game's immediate context known by its pointer (HookDevice), others asked
+static ID3D11DeviceContext* g_immCtx;
 static bool Immediate(ID3D11DeviceContext* ctx)
 {
-    return ctx->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;
+    return ctx == g_immCtx || ctx->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;
+}
+
+// 1.65: per game draw (immediate context), the questions several parts ask about it answered once: its vertex shader's
+// info, its depth target (and that one's texture). Not held: bound for the whole draw; our passes put them back.
+static unsigned g_drawSeq;              // the immediate context's draw now going on (0: none)
+static volatile LONG g_drawGen;
+struct DrawScope {                      // in the draw hooks: a new number for the draw, the outer one back after it
+    unsigned prev; bool on;
+    DrawScope(ID3D11DeviceContext* ctx) : prev(g_drawSeq), on(ctx == g_immCtx) { if (on) g_drawSeq = (unsigned)InterlockedIncrement(&g_drawGen); }
+    ~DrawScope() { if (on) g_drawSeq = prev; }
+};
+static unsigned g_dvSeq, g_ddSeq;
+static struct VsInfo* g_dvInfo;
+static ID3D11DepthStencilView* g_ddDsv;
+static ID3D11Resource* g_ddRes;
+static VsInfo* VsFind(ID3D11VertexShader* vs, bool add);
+static VsInfo* DrawVs(ID3D11DeviceContext* ctx)
+{
+    if (ctx == g_immCtx && g_drawSeq && g_dvSeq == g_drawSeq) return g_dvInfo;
+    ID3D11VertexShader* vs = 0;
+    ctx->VSGetShader(&vs, 0, 0);
+    if (vs) vs->Release();   // (a name only)
+    VsInfo* e = VsFind(vs, false);
+    if (ctx == g_immCtx && g_drawSeq) { g_dvSeq = g_drawSeq; g_dvInfo = e; }
+    return e;
+}
+// the bound depth target's texture (and the view): not held
+static ID3D11Resource* DrawDsv(ID3D11DeviceContext* ctx, ID3D11DepthStencilView** view)
+{
+    if (!(ctx == g_immCtx && g_drawSeq && g_ddSeq == g_drawSeq)) {
+        ID3D11DepthStencilView* dsv = 0;
+        ctx->OMGetRenderTargets(0, 0, &dsv);
+        ID3D11Resource* res = 0;
+        if (dsv) { dsv->GetResource(&res); if (res) res->Release(); dsv->Release(); }
+        if (!(ctx == g_immCtx && g_drawSeq)) { if (view) *view = dsv; return res; }
+        g_ddSeq = g_drawSeq; g_ddDsv = dsv; g_ddRes = res;
+    }
+    if (view) *view = g_ddDsv;
+    return g_ddRes;
 }
 
 static void Replay(ID3D11DeviceContext* ctx, const DrawCall& d)
@@ -3710,6 +3828,7 @@ static void AfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d, bool timed)
 
 static void STDMETHODCALLTYPE HkDraw(ID3D11DeviceContext* ctx, UINT count, UINT start)
 {
+    DrawScope scope(ctx);   // (1.65: the draw's answers cached)
     DrawCall d = { DK_DRAW, count, start, 0, 0, 0 };
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
@@ -3721,6 +3840,7 @@ static void STDMETHODCALLTYPE HkDraw(ID3D11DeviceContext* ctx, UINT count, UINT 
 
 static void STDMETHODCALLTYPE HkDrawIndexed(ID3D11DeviceContext* ctx, UINT count, UINT start, INT base)
 {
+    DrawScope scope(ctx);   // (1.65: the draw's answers cached)
     DrawCall d = { DK_INDEXED, count, start, 0, 0, base };
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
@@ -3733,6 +3853,7 @@ static void STDMETHODCALLTYPE HkDrawIndexed(ID3D11DeviceContext* ctx, UINT count
 
 static void STDMETHODCALLTYPE HkDrawInstanced(ID3D11DeviceContext* ctx, UINT count, UINT inst, UINT start, UINT startInst)
 {
+    DrawScope scope(ctx);   // (1.65: the draw's answers cached)
     DrawCall d = { DK_INSTANCED, count, inst, start, startInst, 0 };
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
@@ -3744,6 +3865,7 @@ static void STDMETHODCALLTYPE HkDrawInstanced(ID3D11DeviceContext* ctx, UINT cou
 
 static void STDMETHODCALLTYPE HkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT count, UINT inst, UINT start, INT base, UINT startInst)
 {
+    DrawScope scope(ctx);   // (1.65: the draw's answers cached)
     DrawCall d = { DK_INDEXED_INSTANCED, count, inst, start, startInst, base };
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
@@ -3772,6 +3894,7 @@ static ID3D11RenderTargetView* g_bbRtv;
 static ID3D11Texture2D* g_bbTex;
 static const int kTextW = 980, kTextH = 960;
 static bool g_textDirty = true;
+static bool g_textNew;   // (the text texture just made: drawn whatever the text)
 static DWORD g_nextStats;
 
 #include "worldedit.inc"
@@ -3787,8 +3910,21 @@ static void UpdateText(ID3D11DeviceContext* ctx)
         d.Usage = D3D11_USAGE_DYNAMIC; d.BindFlags = D3D11_BIND_SHADER_RESOURCE; d.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         if (FAILED(g_dev->CreateTexture2D(&d, 0, &g_textTex))) return;
         g_dev->CreateShaderResourceView(g_textTex, 0, &g_textSrv);
+        g_textNew = true;
     }
     BuildMenu();
+    {   // 1.65: drawn (GDI) and uploaded (3.7 MB) only when the text changed: it was every 500 ms while the menu shows
+        unsigned h = 2166136261u ^ (unsigned)g_mlN;
+        for (int i = 0; i < g_mlN; ++i)
+            for (int k = 0; k < g_ml[i].n; ++k) {
+                for (const char* c = g_ml[i].s[k].t; *c; ++c) h = (h ^ (unsigned char)*c) * 16777619u;
+                h = (h ^ (unsigned)g_ml[i].s[k].c) * 16777619u;
+            }
+        static unsigned last;
+        static bool had;
+        if (had && h == last && !g_textNew) return;
+        had = true; last = h; g_textNew = false;
+    }
     HDC dc = CreateCompatibleDC(0);
     BITMAPINFO bi = {};
     bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
@@ -4270,6 +4406,7 @@ static void* InlineHook(void* target, void* hook, const char* name)
 static void HookDevice(ID3D11Device* dev, ID3D11DeviceContext* ctx)
 {
     if (!dev || !ctx || InterlockedExchange(&g_devHooked, 1)) return;
+    g_immCtx = ctx;   // (the context D3D11CreateDevice gives is the immediate one)
     void** dv = *(void***)dev;
     void** cv = *(void***)ctx;
     Patch(dv, 15, (void*)HkCreatePS, (void**)&oCreatePS);
@@ -4315,10 +4452,24 @@ static void HookDevice(ID3D11Device* dev, ID3D11DeviceContext* ctx)
     Log("hooked the game's D3D11 device");
 }
 
+// 1.65: the overlay's view of the back buffer (DrawOverlay, WeOverlay) was kept for good: DXGI refuses ResizeBuffers while
+// anything holds a back buffer (a resolution change in the game's options, a full-screen switch). Let go first.
+typedef HRESULT(STDMETHODCALLTYPE* ResizeBuffersFn)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+static ResizeBuffersFn oResizeBuffers;
+static HRESULT STDMETHODCALLTYPE HkResizeBuffers(IDXGISwapChain* sc, UINT n, UINT w, UINT h, DXGI_FORMAT f, UINT fl)
+{
+    if (g_bbRtv) { g_bbRtv->Release(); g_bbRtv = 0; }
+    g_bbTex = 0;
+    HRESULT hr = oResizeBuffers(sc, n, w, h, f, fl);
+    Log("swap chain resized to %ux%u: %08lx", w, h, hr);
+    return hr;
+}
+
 static void HookSwapChain(IDXGISwapChain* sc)
 {
     if (!sc || InterlockedExchange(&g_scHooked, 1)) return;
     Patch(*(void***)sc, 8, (void*)HkPresent, (void**)&oPresent);
+    Patch(*(void***)sc, 13, (void*)HkResizeBuffers, (void**)&oResizeBuffers);
     Log("hooked the game's swap chain");
 }
 
@@ -4551,7 +4702,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID)
         sprintf(g_logPath, "%sNewLook.log", g_dir);
         if (!MigrateOldNames()) {   // an old NFSLight.asi was here (now .old): nothing this start
             DeleteFileA(g_logPath);
-            Log("NewLook 1.64: an old NFSLight.asi was in scripts (renamed NFSLight.asi.old): restart the game");
+            Log("NewLook 1.71: an old NFSLight.asi was in scripts (renamed NFSLight.asi.old): restart the game");
             return TRUE;
         }
         sprintf(g_iniPath, "%sNewLook.ini", g_dir);
@@ -4572,7 +4723,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID)
         ZoneLoad();
         WeLoad();
         BptLoad();
-        Log("NewLook 1.64 loaded");
+        Log("NewLook 1.71 loaded");
         AddVectoredExceptionHandler(0, CrashLogger);
         InstallHooks();
     }

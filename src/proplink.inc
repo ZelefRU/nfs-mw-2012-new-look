@@ -147,9 +147,14 @@ static DWORD WINAPI PropThread(void*)
         for (int r = 0; r < g_propPoolN; ++r) ScanAllocation(g_propPool[r], q, n, found);
         int left = 0;
         for (int k = 0; k < n; ++k) if (!found[k]) ++left;
-        // everything (slow), at most every 15 s: exact matches teach where the pool is
-        if (left && GetTickCount() - g_propLastFull > 15000) {
+        // everything (slow), at most every 15 s: exact matches teach where the pool is. 1.65: a whole scan that found
+        // nothing waits twice as long next time (to 2 min): a prop not in memory (its area not loaded) had the whole
+        // address space read every 15 s for as long as the game ran; the known pools are still read every 0.4 s
+        static DWORD gap = 15000;
+        if (left && GetTickCount() - g_propLastFull > gap) {
             g_propLastFull = GetTickCount();
+            int before = 0;
+            for (int k = 0; k < n; ++k) if (found[k]) ++before;
             unsigned char* a = 0;
             HMODULE self = 0;
             GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&PropThread, &self);
@@ -167,6 +172,9 @@ static DWORD WINAPI PropThread(void*)
             bool again = false;
             for (int k = 0; k < n; ++k) if (!found[k]) again = true;
             if (again) for (int r = 0; r < g_propPoolN; ++r) ScanAllocation(g_propPool[r], q, n, found);
+            int after = 0;
+            for (int k = 0; k < n; ++k) if (found[k]) ++after;
+            gap = after > before ? 15000 : (gap < 60000 ? gap * 2 : 120000);
         }
         EnterCriticalSection(&g_propLock);
         for (int k = 0; k < n; ++k)

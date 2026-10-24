@@ -413,56 +413,74 @@ static void BldTick()
         InterlockedExchange(&g_jobBusy, 0);
     }
     if (!g_jobTex || g_jobBusy) return;
-    // read the normal map back: the largest level of at most 512 on its long side
+    // read the normal map back: the largest level of at most 512 on its long side. 1.65: copied now, read two frames
+    // later without waiting (a Map at once waited for the GPU to finish the whole frame: a stall per new building)
+    static ID3D11Texture2D* stage;
+    static unsigned stageFrame;
+    static UINT sw, sh;
+    static bool sRgba, sBc3;
     ID3D11DeviceContext* ctx = 0;
     g_dev->GetImmediateContext(&ctx);
-    D3D11_TEXTURE2D_DESC d;
-    g_jobTex->GetDesc(&d);
-    UINT lv = 0, w = d.Width, h = d.Height;
-    while ((w > 512 || h > 512) && lv + 1 < d.MipLevels) { w = w > 1 ? w / 2 : 1; h = h > 1 ? h / 2 : 1; ++lv; }
-    bool pow2 = w >= 16 && h >= 16 && !(w & (w - 1)) && !(h & (h - 1));
-    DXGI_FORMAT plain = TxSrgb(d.Format, false);
-    bool bc1 = plain == DXGI_FORMAT_BC1_UNORM || plain == DXGI_FORMAT_BC1_TYPELESS, bc3 = plain == DXGI_FORMAT_BC3_UNORM || plain == DXGI_FORMAT_BC3_TYPELESS;
-    bool rgba = plain == DXGI_FORMAT_R8G8B8A8_UNORM || plain == DXGI_FORMAT_R8G8B8A8_TYPELESS;
     HgtEntry* he = HgtFind(g_jobHash, false);
-    if (!pow2 || !(bc1 || bc3 || rgba)) { if (he) he->state = 3; g_jobTex->Release(); g_jobTex = 0; ctx->Release(); InterlockedIncrement(&g_hgtFailed); return; }
-    D3D11_TEXTURE2D_DESC s = d;
-    s.Width = w; s.Height = h; s.MipLevels = 1; s.Usage = D3D11_USAGE_STAGING; s.BindFlags = 0; s.CPUAccessFlags = D3D11_CPU_ACCESS_READ; s.MiscFlags = 0;
-    ID3D11Texture2D* st = 0;
-    if (SUCCEEDED(oCreateTex2D(g_dev, &s, 0, &st))) {
-        oCopySub(ctx, st, 0, 0, 0, 0, g_jobTex, lv, 0);
-        D3D11_MAPPED_SUBRESOURCE m;
-        if (SUCCEEDED(ctx->Map(st, 0, D3D11_MAP_READ, 0, &m))) {
-            int n = w * h;
-            g_job.w = w; g_job.h = h; g_job.hash = g_jobHash;
-            g_job.nx = (float*)malloc(n * 4); g_job.ny = (float*)malloc(n * 4); g_job.nz = (float*)malloc(n * 4);
-            g_job.out = (unsigned char*)malloc(n * 2);
-            unsigned char px[64];
-            for (UINT by = 0; by < (rgba ? h : h / 4); ++by) {
-                const unsigned char* row = (const unsigned char*)m.pData + (size_t)by * m.RowPitch;
-                if (rgba) {
-                    for (UINT x = 0; x < w; ++x) {
-                        int i = by * w + x;
-                        g_job.nx[i] = row[x * 4] / 127.5f - 1; g_job.ny[i] = row[x * 4 + 1] / 127.5f - 1; g_job.nz[i] = row[x * 4 + 2] / 127.5f - 1;
-                    }
-                    continue;
+    if (!stage) {
+        D3D11_TEXTURE2D_DESC d;
+        g_jobTex->GetDesc(&d);
+        UINT lv = 0, w = d.Width, h = d.Height;
+        while ((w > 512 || h > 512) && lv + 1 < d.MipLevels) { w = w > 1 ? w / 2 : 1; h = h > 1 ? h / 2 : 1; ++lv; }
+        bool pow2 = w >= 16 && h >= 16 && !(w & (w - 1)) && !(h & (h - 1));
+        DXGI_FORMAT plain = TxSrgb(d.Format, false);
+        bool bc1 = plain == DXGI_FORMAT_BC1_UNORM || plain == DXGI_FORMAT_BC1_TYPELESS, bc3 = plain == DXGI_FORMAT_BC3_UNORM || plain == DXGI_FORMAT_BC3_TYPELESS;
+        bool rgba = plain == DXGI_FORMAT_R8G8B8A8_UNORM || plain == DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        if (!pow2 || !(bc1 || bc3 || rgba)) { if (he) he->state = 3; g_jobTex->Release(); g_jobTex = 0; ctx->Release(); InterlockedIncrement(&g_hgtFailed); return; }
+        D3D11_TEXTURE2D_DESC sd = d;
+        sd.Width = w; sd.Height = h; sd.MipLevels = 1; sd.Usage = D3D11_USAGE_STAGING; sd.BindFlags = 0; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; sd.MiscFlags = 0;
+        if (SUCCEEDED(oCreateTex2D(g_dev, &sd, 0, &stage))) {
+            oCopySub(ctx, stage, 0, 0, 0, 0, g_jobTex, lv, 0);
+            stageFrame = g_frame; sw = w; sh = h; sRgba = rgba; sBc3 = bc3;
+            ctx->Release();
+            return;
+        }
+        stage = 0;
+        g_jobTex->Release(); g_jobTex = 0;
+        ctx->Release();
+        return;
+    }
+    D3D11_MAPPED_SUBRESOURCE m;
+    HRESULT hr = g_frame - stageFrame < 2 ? DXGI_ERROR_WAS_STILL_DRAWING : ctx->Map(stage, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m);
+    if (hr == DXGI_ERROR_WAS_STILL_DRAWING) { ctx->Release(); return; }
+    if (SUCCEEDED(hr)) {
+        UINT w = sw, h = sh;
+        bool rgba = sRgba, bc3 = sBc3;
+        int n = w * h;
+        g_job.w = w; g_job.h = h; g_job.hash = g_jobHash;
+        g_job.nx = (float*)malloc(n * 4); g_job.ny = (float*)malloc(n * 4); g_job.nz = (float*)malloc(n * 4);
+        g_job.out = (unsigned char*)malloc(n * 2);
+        unsigned char px[64];
+        for (UINT by = 0; by < (rgba ? h : h / 4); ++by) {
+            const unsigned char* row = (const unsigned char*)m.pData + (size_t)by * m.RowPitch;
+            if (rgba) {
+                for (UINT x = 0; x < w; ++x) {
+                    int i = by * w + x;
+                    g_job.nx[i] = row[x * 4] / 127.5f - 1; g_job.ny[i] = row[x * 4 + 1] / 127.5f - 1; g_job.nz[i] = row[x * 4 + 2] / 127.5f - 1;
                 }
-                for (UINT bx = 0; bx < w / 4; ++bx) {
-                    Bc1Block(row + bx * (bc3 ? 16 : 8) + (bc3 ? 8 : 0), px);
-                    for (int t = 0; t < 16; ++t) {
-                        int i = (by * 4 + t / 4) * w + bx * 4 + t % 4;
-                        g_job.nx[i] = px[t * 4] / 127.5f - 1; g_job.ny[i] = px[t * 4 + 1] / 127.5f - 1; g_job.nz[i] = px[t * 4 + 2] / 127.5f - 1;
-                    }
+                continue;
+            }
+            for (UINT bx = 0; bx < w / 4; ++bx) {
+                Bc1Block(row + bx * (bc3 ? 16 : 8) + (bc3 ? 8 : 0), px);
+                for (int t = 0; t < 16; ++t) {
+                    int i = (by * 4 + t / 4) * w + bx * 4 + t % 4;
+                    g_job.nx[i] = px[t * 4] / 127.5f - 1; g_job.ny[i] = px[t * 4 + 1] / 127.5f - 1; g_job.nz[i] = px[t * 4 + 2] / 127.5f - 1;
                 }
             }
-            ctx->Unmap(st, 0);
-            g_job.done = 0;
-            InterlockedExchange(&g_jobBusy, 1);
-            HANDLE th = CreateThread(0, 0, HgtWorker, 0, 0, 0);
-            if (th) CloseHandle(th); else { g_jobBusy = 0; if (he) he->state = 3; }
         }
-        st->Release();
+        ctx->Unmap(stage, 0);
+        g_job.done = 0;
+        InterlockedExchange(&g_jobBusy, 1);
+        HANDLE th = CreateThread(0, 0, HgtWorker, 0, 0, 0);
+        if (th) CloseHandle(th); else { g_jobBusy = 0; if (he) he->state = 3; }
     }
+    stage->Release();
+    stage = 0;
     g_jobTex->Release();
     g_jobTex = 0;
     ctx->Release();

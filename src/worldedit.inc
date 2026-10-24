@@ -292,17 +292,43 @@ static void WeTag(const float X[3][3], const float T[3], int* q, unsigned* rh)
     *rh = h;
 }
 
+// 1.65: what a world matrix tells (its key, tag, place, scale), remembered by its 64 bytes: the same objects come with
+// the same matrices every frame (~9000 draws a frame each paid 12 floorf and ~100 64-bit multiplies, a call each on
+// 32-bit code, for the same answer). 4 places per hash, the oldest one replaced.
+struct WeMemo { unsigned m[16]; unsigned long long key; int q[3]; unsigned rh; float T[3], scale; unsigned char lay, ok, valid; };
+static WeMemo g_weMemo[8192];
+static unsigned g_weMemoTurn;
+static const WeMemo& WeMemoOf(const float* f)
+{
+    const unsigned* u = (const unsigned*)f;
+    unsigned h = 0x9e3779b9u;
+    for (int i = 0; i < 16; ++i) { h = (h ^ u[i]) * 0x85ebca6bu; h ^= h >> 13; }
+    unsigned b = h & (8191 & ~3u);
+    for (int k = 0; k < 4; ++k) { const WeMemo& m = g_weMemo[b + k]; if (m.valid && !memcmp(m.m, u, 64)) return m; }
+    WeMemo& m = g_weMemo[b + (g_weMemoTurn++ & 3)];
+    memcpy(m.m, u, 64);
+    m.valid = 1; m.key = 0; m.rh = 0; m.scale = 1;
+    memset(m.q, 0, sizeof(m.q)); memset(m.T, 0, sizeof(m.T));
+    float X[3][3];
+    m.ok = WeRead(f, &m.lay, X, m.T);
+    if (!m.ok) return m;
+    WeTag(X, m.T, m.q, &m.rh);
+    float m2 = 0;
+    for (int i = 0; i < 3; ++i) { float l2 = X[i][0] * X[i][0] + X[i][1] * X[i][1] + X[i][2] * X[i][2]; if (l2 > m2) m2 = l2; }
+    m.scale = sqrtf(m2);
+    bool ident = fabsf(m.T[0]) + fabsf(m.T[1]) + fabsf(m.T[2]) < 1e-3f;
+    for (int i = 0; i < 3 && ident; ++i) for (int j = 0; j < 3; ++j) if (fabsf(X[i][j] - (i == j ? 1.0f : 0.0f)) > 1e-4f) ident = false;
+    if (ident) m.lay = 3;
+    else m.key = WeKeyPack(m.q, m.rh);
+    return m;
+}
+
 // 0: not one object (the baked world is drawn with no matrix of its own: identity at the origin)
 static unsigned long long WeKeyOf(const float* f, unsigned char* lay)
 {
-    float X[3][3], T[3];
-    if (!WeRead(f, lay, X, T)) return 0;
-    bool ident = fabsf(T[0]) + fabsf(T[1]) + fabsf(T[2]) < 1e-3f;
-    for (int i = 0; i < 3 && ident; ++i) for (int j = 0; j < 3; ++j) if (fabsf(X[i][j] - (i == j ? 1.0f : 0.0f)) > 1e-4f) ident = false;
-    if (ident) { *lay = 3; return 0; }
-    int q[3]; unsigned rh;
-    WeTag(X, T, q, &rh);
-    return WeKeyPack(q, rh);
+    const WeMemo& m = WeMemoOf(f);
+    *lay = m.lay;
+    return m.key;
 }
 
 // the edit on a matrix: scaled and turned about the vertical through the pivot (its own origin if none), then moved
@@ -476,10 +502,17 @@ static unsigned long long WeInstKey(ID3D11DeviceContext* ctx, VsInfo* e, const D
     ID3D11Buffer* vb = 0; UINT stride = 0, vbOff = 0;
     ctx->IAGetVertexBuffers(0, 1, &vb, &stride, &vbOff);
     if (vb) vb->Release();
-    unsigned long long h = 1469598103934665603ull;
-    auto mix = [&](unsigned long long v) { for (int i = 0; i < 8; ++i) { h ^= (v >> (i * 8)) & 255; h *= 1099511628211ull; } };
-    mix((size_t)ib); mix(ibOff); mix((size_t)vb); mix(vbOff); mix(d.kind); mix(d.a); mix(d.b); mix(d.c); mix((unsigned)d.base);
-    *mesh = h;
+    // (1.65: two 32-bit lanes, a word at a time: FNV-64 a byte at a time cost ~70 64-bit multiplies, each a call here)
+    unsigned h1 = 0x811c9dc5u, h2 = 0x9e3779b9u;
+    auto mix = [&](unsigned v) {
+        unsigned k = v * 0xcc9e2d51u; k = (k << 15) | (k >> 17); k *= 0x1b873593u;
+        h1 ^= k; h1 = (h1 << 13) | (h1 >> 19); h1 = h1 * 5 + 0xe6546b64u;
+        h2 += v * 0x85ebca6bu; h2 ^= h2 >> 13; h2 *= 0xc2b2ae35u;
+    };
+    auto fin = [&]() { unsigned a = h1 ^ (h1 >> 16), c = h2 ^ (h2 >> 15); a *= 0x85ebca6bu; c *= 0x27d4eb2fu; a ^= a >> 13; c ^= c >> 16;
+                       return ((unsigned long long)a << 32) | c; };
+    mix((unsigned)(size_t)ib); mix(ibOff); mix((unsigned)(size_t)vb); mix(vbOff); mix(d.kind); mix(d.a); mix(d.b); mix(d.c); mix((unsigned)d.base);
+    *mesh = fin();
     *placed = false;
     if (e && e->wSlot >= 0 && e->wSlot <= 13 && e->wOff >= 0) {
         ID3D11Buffer* cb = 0;
@@ -489,20 +522,17 @@ static unsigned long long WeInstKey(ID3D11DeviceContext* ctx, VsInfo* e, const D
             CbShadow* s = CbsFind(cb);
             if (!s) CbsAdd(cb);
             else if (s->cpu && s->valid && !s->pending && (UINT)e->wOff + 64 <= s->size) {
-                float X[3][3];
-                unsigned char lay;
-                if (WeRead((const float*)(s->cpu + e->wOff), &lay, X, T)) {
-                    int q[3]; unsigned rh;
-                    WeTag(X, T, q, &rh);
-                    float m2 = 0;
-                    for (int i = 0; i < 3; ++i) { float l2 = X[i][0] * X[i][0] + X[i][1] * X[i][1] + X[i][2] * X[i][2]; if (l2 > m2) m2 = l2; }
-                    *scale = sqrtf(m2);
-                    mix((unsigned)q[0]); mix((unsigned)q[1]); mix((unsigned)q[2]); mix(rh);
+                const WeMemo& m = WeMemoOf((const float*)(s->cpu + e->wOff));
+                if (m.ok) {
+                    memcpy(T, m.T, 12);
+                    *scale = m.scale;
+                    mix((unsigned)m.q[0]); mix((unsigned)m.q[1]); mix((unsigned)m.q[2]); mix(m.rh);
                     *placed = true;
                 }
             }
         }
     }
+    unsigned long long h = fin();
     return h ? h : 1;
 }
 
@@ -869,10 +899,7 @@ static int WeBefore(ID3D11DeviceContext* ctx, const DrawCall& d)
     acc.on = (g_weStat.draws & 7) == 0;
     if (acc.on) QueryPerformanceCounter(&acc.t);
     ++g_weStat.draws;
-    ID3D11VertexShader* vs = 0;
-    ctx->VSGetShader(&vs, 0, 0);
-    if (vs) vs->Release();   // (a name only)
-    VsInfo* e = VsFind(vs, false);
+    VsInfo* e = DrawVs(ctx);   // (1.65: asked once a draw)
     if (g_weOn && e && e->vpSlot >= 0 && e->vpSlot <= 13 && e->vpSlot != e->wSlot) WeCamNote(ctx, e);
     if (!e || e->wSlot < 0 || e->wSlot > 13 || e->car || e->wOff < 0) return WE_DRAW;
     ID3D11Buffer* cb = 0;
@@ -1553,7 +1580,9 @@ static void WeUpdate(bool active)
 static void WeFrame()
 {
     bool live = g_weOn || (g_weN && g_weApply);
-    bool copy = live || (g_enabled && g_p[P_SS].v > 0.5f && !g_ssNight);   // (our sun shadows know their objects by the copies too)
+    // (our sun shadows know their objects by the copies too; 1.65: the rain map's and the lamp faces' replays are recorded
+    // with the copies, at night too)
+    bool copy = live || (g_enabled && ((g_p[P_SS].v > 0.5f && !g_ssNight) || g_p[P_SSR + 1].v > 0 || (g_lampUse > 0 && g_p[P_LAMP_SHADOW_MAPS].v > 0.5f)));
     if (copy != g_cbsCopy) {
         g_cbsCopy = copy;
         for (int k = 0; k < kCbsSlots; ++k) { g_cbs[k].valid = false; g_cbs[k].keyOff = -1; }
@@ -1563,11 +1592,12 @@ static void WeFrame()
     static DWORD nextPurge, nextStat;
     DWORD now = GetTickCount();
     if ((LONG)(now - nextPurge) >= 0) { nextPurge = now + 10000; CbsPurge(!copy); }
+    static unsigned statFrame;
     if (live && (LONG)(now - nextStat) >= 0) {
-        if (nextStat && g_weStat.draws) {
+        if (nextStat && g_weStat.draws && g_frame > statFrame) {
             char sz[96] = "";
             for (unsigned k = 0; k < g_cbsSizeN; ++k) sprintf(sz + strlen(sz), " %u", g_cbsSizes[k]);
-            unsigned f = 600;
+            unsigned f = g_frame - statFrame;   // (1.65: the frames counted; it was 600, as if 24 a second: x2 at 50)
             Log("world editor (per frame, ~%u frames): draws %u, with a world matrix %u (no copy yet %u), layout rows %u / transposed %u / "
                 "identity %u / rows with w used %u / other %u, objects drawn %u | hidden skipped %u, moved %u | pick %u, mask %u | buffers %d (sizes%s) | CPU %.2f ms",
                 f, g_weStat.draws / f, g_weStat.world / f, g_weStat.noData / f, g_weStat.lay[1] / f, g_weStat.lay[2] / f, g_weStat.lay[3] / f,
@@ -1576,6 +1606,7 @@ static void WeFrame()
         }
         memset(&g_weStat, 0, sizeof(g_weStat));
         nextStat = now + 25000;
+        statFrame = g_frame;
     }
     if (g_dev && g_weOn) {
         ID3D11DeviceContext* mc = 0;
