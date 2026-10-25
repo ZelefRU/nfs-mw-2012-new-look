@@ -399,7 +399,8 @@ struct SunPathState {
     double gameT, fitA, fitB, fitT, fitSpan, out;   // the game's time; the line (phase = A + B (t - T)), its samples' span; the phase shown (cycles counted)
     SpSample smp[256];
     int smpN, smpHead;
-    double smpLastT, initT, lostT, lastT, savedT, markT;   // (markT: the game's time of the last turn's mark; 0 none)
+    double smpLastT, initT, lostT, lastT, savedT, markT;
+    float wrongS; double flipT;          // 1.95: seconds the game's light (sun / moon) has disagreed with ours; the last flip (real s)   // (markT: the game's time of the last turn's mark; 0 none)
     float initAz, prev[3], col[3];
     float extAz, turn[2];                // the swing's turns: the furthest azimuth since the light last turned; the last turns (dawn's, dusk's)
     int extDir, still;                   // its way now (k-wise: 1 up towards the dawn turn, -1 down; 0 not known); readbacks it stood still
@@ -414,7 +415,9 @@ struct SunPathState {
     DWORD nextLog;
 };
 static SunPathState g_sp;
+static float WxHourNow() { return g_sunActive ? g_sp.hour : -1.0f; }   // 1.89 (weather.inc): our clock, hours
 static double g_spClock = -1;                    // (test harness: its own clock, s)
+static double g_spHoldUntil;                     // 1.96b: the game's light taken as still until then (the quick bench put its clock back)
 static float g_ssSunGame[3];                     // the game's key light (light -> scene), as read back
 static unsigned g_flareDraws[4];                 // the game's flare draws with our VS (glare 1, 2; its sun's visibility; 1.37: its moon)
 static float g_coronaGame[3];                    // the game's corona (light -> scene), as last seen (1.31: the flare; 1.34: the debug)
@@ -528,6 +531,18 @@ static void SpTurn(int i, float az)
     if (both) g_sp.swingKnown = true;
 }
 
+// 1.95: the phase (cycles counted on from `near`) where our clock shows `h` hours (the inverse of the clock below)
+static double SpPhaseAtHour(double h, double near)
+{
+    double p = g_sp.aOn + (h - 6 - g_p[P_CLOCK].v) / 24;
+    return p + floor(near - p + 0.5);
+}
+// 1.96b: a phase well in the game's day (its sun on) or in its night: 1.5 h of our clock from its sun's switches
+static bool SpWellIn(double ph, bool inDay)
+{
+    double D = SpWrap1(g_sp.aOff - g_sp.aOn), d = SpWrap1(ph - g_sp.aOn), m = 1.5 / 24;
+    return inDay ? d > m && d < D - m : d > D + m && d < 1 - m;
+}
 // one readback of the game's key light: dir (light -> scene), col its colour (0: not read)
 static void SunPathStep(const float* dir, const float* col)
 {
@@ -538,6 +553,14 @@ static void SunPathStep(const float* dir, const float* col)
     float dt = g_sp.lastT > 0 ? (float)(t - g_sp.lastT) : 0;
     if (dt < 0) dt = 0; else if (dt > 0.25f) dt = 0.25f;
     g_sp.lastT = t;
+    // 1.96b: just after the quick bench put the game's clock back (and our path as it was before it): its light is read
+    // back a frame or two late (the bench's hour): taken as standing still a moment
+    float held[3], heldCol[3];
+    if (t < g_spHoldUntil && g_sp.init) {
+        for (int j = 0; j < 3; ++j) held[j] = -g_sp.prev[j];
+        dir = held;
+        if (col) { memcpy(heldCol, g_sp.col, 12); col = heldCol; }
+    }
     const float D = 57.29578f;
     float T[3] = { -dir[0], -dir[1], -dir[2] };   // towards the light
     float el = asinf(T[1] > 1 ? 1 : T[1] < -1 ? -1 : T[1]) * D, az = atan2f(T[0], T[2]) * D;
@@ -555,6 +578,10 @@ static void SunPathStep(const float* dir, const float* col)
     memcpy(g_sp.prev, T, 12);
     g_sp.init = true;
     double dtp = paused || first ? 0 : dt;
+    // 1.96d: the game's own clock known (gametime.inc): ours is it (its seconds of the day as hours: its sun comes on at
+    // ~06:00 of it and goes off at ~20:45, as our clock's defaults); the line through its light's azimuth, its jumps and
+    // the guards only without it
+    bool tod = g_sp.eased && TodKnown();
     g_sp.gameT += dtp;
     double a; float s;
     SpPhases(az, &a, &s);
@@ -562,30 +589,41 @@ static void SunPathStep(const float* dir, const float* col)
     wq = wq < 0 ? 0 : wq > 1 ? 1 : wq;
     double wo = s * wq * wq * (3 - 2 * wq);   // how well the azimuth tells the phase here (none near the turns)
     double prevPh = g_sp.ph;
-    if (first || jump) {
+    if ((first || jump) && !tod) {
         SpRestart(az, t);
         g_sp.extDir = 0; g_sp.extAz = az; g_sp.markT = 0;   // (its turns: looked for anew)
         if (jump) Log("sun path: the game's light jumped %.1f deg: its phase from its azimuth again", step);
     }
     // not sure of the way yet: by day / night meanwhile; then the way the azimuth goes (its first 0.2 deg; 5 s still: by day / night)
-    if (!g_sp.sure) {
+    if (!g_sp.sure && !tod) {
         float dx = g_sp.k * SpWrap(az - g_sp.initAz);
         bool moved = fabsf(dx) > 0.2f, dayWay = moved ? dx < 0 : day;
         double p0 = dayWay ? a : 1 - a;
+        // (1.95: the moon (its light under 0.6) is off the sun's line (the user's log: azimuth 56..114, the line -73..-2):
+        // its azimuth gives no phase (clamped: the dawn's turn, our sun up at 08:30): our night kept, else an hour after
+        // our sunset. 1.96b: our phase kept unless it is well in the game's day, then an hour after its sun goes off (by
+        // the game's night, not our moon: our sunrise set before its sun comes on (the user's 03:45) puts ours up in it)
+        if (!day && lum < 0.6f && g_sp.eased) {
+            p0 = SpWellIn(g_sp.out, true) ? g_sp.aOff + 1.0 / 24 : g_sp.out;
+            moved = false;
+        }
         if (moved || g_sp.gameT - g_sp.initT > 5) {
             g_sp.sure = true;
             g_sp.out = p0 + floor(g_sp.out - p0 + 0.5);   // (cycles counted on)
             g_sp.smpN = 0; g_sp.smpLastT = -1e9;
             SpAdd(g_sp.out, 1);
-            if (!first) Log("sun path: the game's light goes the %s way: its phase %.3f", dayWay ? "day's" : "night's", p0);
+            if (!first) Log("sun path: the game's light goes the %s way: its phase %.3f%s", dayWay ? "day's" : "night's", p0, !day && lum < 0.6f && g_sp.eased ? " (the moon: our night)" : "");
         } else g_sp.out = p0 + floor(g_sp.out - p0 + 0.5);
         prevPh = SpWrap1(g_sp.out);
     }
-    if (g_sp.sure && !paused && !first && !jump) {
+    if (g_sp.sure && !paused && !first && !jump && !tod) {
         double pred = g_sp.fitA + g_sp.fitB * (g_sp.gameT - g_sp.fitT);
-        // a sample where the azimuth tells well (1/200 of a day apart)
+        // a sample where the azimuth tells well (1/200 of a day apart). 1.96b: by day only: the game's moon is off the
+        // sun's line (the user's log, 20:42-20:45: "lost the game's day" every 9 s; its samples bent the line: our clock
+        // went on 2 h at once); the night runs on at the day's speed kept
         double gap = 0.005 / g_sp.fitB;   // (256 of them: the last ~1.3 days)
-        if (wo > 0.5 && g_sp.gameT - g_sp.smpLastT >= (gap > 0.2 ? gap : 0.2)) {
+        if (!day) g_sp.lostT = -1;
+        if (day && wo > 0.5 && g_sp.gameT - g_sp.smpLastT >= (gap > 0.2 ? gap : 0.2)) {
             g_sp.smpLastT = g_sp.gameT;
             double c1 = a + floor(pred - a + 0.5), c2 = (1 - a) + floor(pred - (1 - a) + 0.5), cu = fabs(c1 - pred) <= fabs(c2 - pred) ? c1 : c2;
             if (fabs(cu - pred) < 0.06) { SpAdd(cu, wo); g_sp.lostT = -1; }
@@ -596,6 +634,7 @@ static void SunPathStep(const float* dir, const float* col)
             }
         }
         // the swing's turns: where its azimuth turns back by 2.5 deg (a turn seen whole: the way known before it); its mark
+        if (!day) { g_sp.extDir = 0; g_sp.extAz = az; }   // (1.96b: the moon's azimuth tells no turns: looked for anew by day)
         float d = g_sp.k * SpWrap(az - g_sp.extAz);
         int was = g_sp.extDir;
         if (g_sp.extDir >= 0) {
@@ -624,15 +663,46 @@ static void SunPathStep(const float* dir, const float* col)
         if (g_sp.fitSpan * g_sp.fitB > 0.3) g_sp.rate += (g_sp.fitB - g_sp.rate) * (dtp / 30 > 1 ? 1 : dtp / 30);
     }
     // the phase shown: the line's now, never back (a fifth of its speed on), at most 3x ahead; far off: at once
-    if (g_sp.sure) {
+    if (g_sp.sure && !tod) {
         double now = g_sp.fitA + g_sp.fitB * (g_sp.gameT - g_sp.fitT), adv = g_sp.fitB * dtp, dd = now - (g_sp.out + adv);
-        if (fabs(dd) > 0.1) g_sp.out = now;
-        else g_sp.out += adv + (dd > 2 * adv ? 2 * adv : dd < -0.8 * adv ? -0.8 * adv : dd);
+        if (fabs(dd) > 0.1) {   // (1.96b: logged)
+            static double lastLog = -1e9;
+            if (t - lastLog > 5) { lastLog = t; Log("sun path: our clock to its line at once (%.3f of a day %s)", fabs(dd), dd > 0 ? "on" : "back"); }
+            g_sp.out = now;
+        } else g_sp.out += adv + (dd > 2 * adv ? 2 * adv : dd < -0.8 * adv ? -0.8 * adv : dd);
         if (g_sp.extDir != 0) {   // never further past the next turn than its azimuth came back from it (+0.4 deg): the line
             float back = fabsf(SpWrap(az - g_sp.extAz));   // may run on at a speed gone by where the azimuth tells little
             double x = 1 - (back + 0.4) / (g_sp.r > 5 ? g_sp.r : 5);
             double L = (g_sp.extDir < 0 ? 0.5 : 0.0) + acos(x < -1 ? -1 : x) / 6.283185307179586, over = SpWrap1(g_sp.out - L);
             if (over < 0.4) g_sp.out -= over;   // (past it; just after the last turn's mark: over 0.46 and more)
+        }
+    }
+    // 1.95: the game's moon (its light under 0.6) 3 s while our clock is in its day (the user's log, 02:35: the light
+    // jumped 5..35 deg a few times in the night, the phase taken anew from the moon's azimuth: our sun up at 08:45): an
+    // hour after its sun goes off; its strong sun while our clock is in its night: an hour after its sun comes on (once
+    // in 20 s). 1.96b: by the game's day and night (its sun's switches, 1.5 h into them), not by our sun's height: our
+    // sunrise and sunset are the player's (the user's 03:45 put ours up in the game's night: at 04:30 and 05:30 the clock
+    // went back to 01:00)
+    if (g_sp.sure && !first && !jump && g_sp.eased && !g_qbHold && !tod) {   // (1.96: not while the quick bench sets our clock)
+        bool moonUnderSun = !day && lum < 0.6f && SpWellIn(g_sp.out, true), sunOverNight = day && lum > 2 && SpWellIn(g_sp.out, false);
+        g_sp.wrongS = moonUnderSun || sunOverNight ? g_sp.wrongS + dt : 0;
+        if (g_sp.wrongS > 3 && t - g_sp.flipT > 20) {
+            double to = (moonUnderSun ? g_sp.aOff : g_sp.aOn) + 1.0 / 24;
+            to += floor(g_sp.out - to + 0.5);
+            Log("sun path: the game's %s while our clock is in its %s (%02d:%02d): our clock to an hour after its sun %s", day ? "sun" : "moon",
+                day ? "night" : "day", (int)g_sp.hour, (int)(g_sp.hour * 60) % 60, moonUnderSun ? "goes off" : "comes on");
+            g_sp.flipT = t; g_sp.wrongS = 0;
+            g_sp.out = to;
+            g_sp.smpN = 0; g_sp.smpLastT = -1e9; g_sp.lostT = -1;
+            SpAdd(g_sp.out, 1);
+        }
+    }
+    if (tod) {
+        g_sp.out = SpPhaseAtHour(TodGet() / 3600.0 + g_p[P_CLOCK].v, g_sp.out);
+        g_sp.sure = true;
+        if (!first && day != g_sp.wasDay) {
+            float h = TodGet() / 3600;
+            Log("game time: its sun %s at its %02d:%02d", day ? "comes on" : "goes off", (int)h, (int)(h * 60) % 60);
         }
     }
     g_sp.ph = SpWrap1(g_sp.out);
@@ -875,7 +945,13 @@ static ID3D11Buffer* CoronaCopy(ID3D11DeviceContext* ctx, ID3D11Buffer* b, int o
     if (FAILED(ctx->Map(g_coronaPool[k], 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) return 0;
     memcpy(m.pData, data, size);
     float* nd = (float*)((unsigned char*)m.pData + off);
-    for (int j = 0; j < 3; ++j) nd[j] = s * g_sunSky[j];   // (1.33: the sun, at night under the horizon)
+    // 1.93: its glow round the sun (the game's air scattering: ScatteringSettings.y / (1 + ScatteringSettings.x dot(view,
+    // this))^2 x ScatteringColor, its PSs use it only in that dot) under our clouds: this shorter, the lobe flattens
+    // into the even haze (its VS projects it to the screen for the shafts: x / w, the length cancels; never 0)
+    float cs = g_enabled && g_p[P_SKY].v >= 0.5f ? g_csSunHere : 1.0f;
+    float f = cs * cs * SkyDeckSunK();
+    f = f < 0.02f ? 0.02f : f > 1 ? 1 : f;
+    for (int j = 0; j < 3; ++j) nd[j] = s * g_sunSky[j] * f;   // (1.33: the sun, at night under the horizon)
     ctx->Unmap(g_coronaPool[k], 0);
     return g_coronaPool[k];
 }
@@ -945,12 +1021,34 @@ static ID3D11Buffer* g_flareCb;
 static bool g_flareTried, g_flareOn, g_flareLogged[4];
 static ID3D11VertexShader* g_flareSavedVs;
 static ID3D11Buffer* g_flareSavedCb;
-static ID3D11ShaderResourceView* g_flareSavedSrv;
+static ID3D11ShaderResourceView* g_flareSavedSrv, *g_flareSavedCs;
 static unsigned g_flareCbFrame;
 
 static const char* kFlareCommon = R"HLSL(
-cbuffer FlareCB : register(b5) { float4 FL0, FL1, FL2, FL3; };   // ours (light -> scene, world), its light; the game's key light; its corona (w: known); our moon (towards, w: up)
+cbuffer FlareCB : register(b5) { float4 FL0, FL1, FL2, FL3, FL4, FL5; };   // ours (light -> scene, world), its light; the game's key light; its corona (w: known); our moon (towards, w: up)
+// 1.92: FL4 our clouds' shadow map (origin x, z, its height, m a texel (0: none)), FL5.x the sun through a thick deck
 Texture2D<float4> tCamRec : register(t0);                    // this frame's camera record: rays -(A + B u + C v)
+Texture2D<float> tFlCs : register(t50);                      // 1.92: our clouds' shadow map (sky.inc)
+// 1.92: how much of the sun our clouds let through towards the camera (its glare: the game sees only the depth there:
+// the sky, our clouds not)
+float FlareClouds()
+{
+    float k = FL5.x;
+    float3 toSun = -normalize(FL0.xyz), cam = tCamRec.Load(int3(3, 0, 0)).xyz;
+    if (FL4.w > 0 && toSun.y > 0.03) {
+        float2 g = cam.xz + toSun.xz * ((FL4.z - cam.y) / toSun.y);
+        float2 t = (g - FL4.xy) / FL4.w - 0.5;
+        if (all(t > 2) && all(t < 253)) {
+            int2 i = (int2)floor(t);
+            float2 f = t - i;
+            float a = lerp(tFlCs.Load(int3(i, 0)), tFlCs.Load(int3(i + int2(1, 0), 0)), f.x);
+            float b = lerp(tFlCs.Load(int3(i + int2(0, 1), 0)), tFlCs.Load(int3(i + int2(1, 1), 0)), f.x);
+            float c = saturate(lerp(a, b, f.y));
+            k *= c * c;
+        }
+    }
+    return k;
+}
 float3 ToView(float3 w)
 {
     float3 A = tCamRec.Load(int3(0, 0, 0)).xyz, B = tCamRec.Load(int3(1, 0, 0)).xyz, C = tCamRec.Load(int3(2, 0, 0)).xyz;
@@ -985,7 +1083,7 @@ G1Out VS_Glare1(G1In i)
     r = max(abs(i.pos.y), abs(i.pos.x)) * r - float3(0, 0, 1);
     float4 A = Ours(GenericVector4_A.xyz);
     float k = saturate(-dot(A.xyz, r));
-    o.t1 = k * k * k * 4 * GenericVector4_B.xyz * A.w;
+    o.t1 = k * k * k * 4 * GenericVector4_B.xyz * A.w * FlareClouds();
     o.t3 = float4(i.col.xyz * i.col.w, i.col.w);
     return o;
 }
@@ -999,7 +1097,7 @@ G2Out VS_Glare2(G2In i)
     o.t2 = i.uv;
     float4 A = Ours(GenericVector4_A.xyz);
     float k = saturate(-dot(A.xyz, i.n)) * 0.3;
-    o.t1 = k * k * k * 4 * GenericVector4_B.xyz * A.w;
+    o.t1 = k * k * k * 4 * GenericVector4_B.xyz * A.w * FlareClouds();
     return o;
 }
 )HLSL";
@@ -1052,9 +1150,14 @@ MOut VS_Moon(MIn i)
         float3 r = normalize(-(A + B * uv.x + C * uv.y)), g1 = -normalize(FL1.xyz), g2 = -normalize(FL2.xyz);
         float k1 = dot(r, g1), k2 = FL2.w > 0.5 ? dot(r, g2) : -1;
         if (max(k1, k2) > 0.978) {   // (within 12 deg of the game's moon: its quad)
-            bool f0, f1;
-            float2 gu = DirUv(k2 >= k1 ? g2 : g1, f0), ou = DirUv(normalize(FL3.xyz), f1);
-            if (FL3.w > 0.5 && f0 && f1) c.xy += (ou - gu) * float2(2, -2) * c.w;
+            // (1.96b: the corner's direction turned as the game's moon to ours: its size and shape on the sky kept; moved on
+            // the screen it kept the stretch of the game's moon's place, near a wide screen's sides)
+            float3 g = k2 >= k1 ? g2 : g1, o = normalize(FL3.xyz), ax = cross(g, o);
+            float cg = dot(g, o);
+            bool f1 = false;
+            float2 nu = 0;
+            if (FL3.w > 0.5 && cg > -0.99) nu = DirUv(normalize(r * cg + cross(ax, r) + ax * (dot(ax, r) / (1 + cg))), f1);
+            if (f1) c.xy = (nu * float2(2, -2) + float2(-1, 1)) * c.w;
             else c = float4(0, 0, -1, 1);   // (out of sight)
         }
     }
@@ -1102,7 +1205,7 @@ static bool FlareEnsure()
         if (err) err->Release();
     }
     D3D11_BUFFER_DESC bd = {};
-    bd.ByteWidth = 64; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    bd.ByteWidth = 96; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     if (!made || FAILED(g_dev->CreateBuffer(&bd, 0, &g_flareCb))) { g_flareCb = 0; Log("sun flare: ours not made"); return false; }
     Log("sun flare: ours made (%d of 4 shaders)", made);
     return true;
@@ -1145,6 +1248,13 @@ static void FlareBefore(ID3D11DeviceContext* ctx)
         c[3] = g_sunSkyW; c[7] = 1; c[11] = g_coronaGameKnown ? 1.0f : 0.0f;
         for (int j = 0; j < 3; ++j) c[12 + j] = g_moonDisc[j];
         c[15] = g_moonDisc[3] > 0.01f ? 1.0f : 0.0f;
+        // 1.92: our clouds (sky.inc): their shadow map, the thick deck (as the sky's CloudDeck)
+        bool skyOn = g_enabled && g_p[P_SKY].v >= 0.5f;
+        float cover = skyOn ? g_p[P_SKY + 2].v : 0.0f, deck = (cover - 0.75f) / 0.2f, sk = g_p[236].v;
+        deck = (deck < 0 ? 0 : deck > 1 ? 1 : deck) * (0.6f + 0.4f * g_p[P_SKY + 11].v);
+        c[16] = g_csOrigin[0]; c[17] = g_csOrigin[2]; c[18] = g_csOrigin[1];
+        c[19] = skyOn && cover > 0 && g_p[P_SKY + 8].v > 0 && g_csSrv && g_csOk ? kCsTexel : 0.0f;
+        c[20] = 1 + (sk * sk - 1) * deck; c[21] = c[22] = c[23] = 0;
         ctx->Unmap(g_flareCb, 0);
         g_flareCbFrame = g_frame + 1;
     }
@@ -1167,9 +1277,11 @@ static void FlareBefore(ID3D11DeviceContext* ctx)
     g_flareSavedVs = vs;   // (its reference kept until after the draw)
     ctx->VSGetConstantBuffers(5, 1, &g_flareSavedCb);
     ctx->VSGetShaderResources(0, 1, &g_flareSavedSrv);
+    ctx->VSGetShaderResources(50, 1, &g_flareSavedCs);
     ctx->VSSetShader(g_flareVs[k], 0, 0);
     ctx->VSSetConstantBuffers(5, 1, &g_flareCb);
     ctx->VSSetShaderResources(0, 1, &cam);
+    ctx->VSSetShaderResources(50, 1, &g_csSrv);   // (1.92: our clouds over the glare)
     g_flareOn = true;
     ++g_flareDraws[k];
     if (k == 2) {   // (the sun's visibility target: its sprite reads it)
@@ -1331,10 +1443,12 @@ static void FlareAfter(ID3D11DeviceContext* ctx)
     ctx->VSSetShader(g_flareSavedVs, 0, 0);
     ctx->VSSetConstantBuffers(5, 1, &g_flareSavedCb);
     ctx->VSSetShaderResources(0, 1, &g_flareSavedSrv);
+    ctx->VSSetShaderResources(50, 1, &g_flareSavedCs);
     if (g_flareSavedVs) g_flareSavedVs->Release();
     if (g_flareSavedCb) g_flareSavedCb->Release();
     if (g_flareSavedSrv) g_flareSavedSrv->Release();
-    g_flareSavedVs = 0; g_flareSavedCb = 0; g_flareSavedSrv = 0;
+    if (g_flareSavedCs) g_flareSavedCs->Release();
+    g_flareSavedVs = 0; g_flareSavedCb = 0; g_flareSavedSrv = 0; g_flareSavedCs = 0;
 }
 
 static void SsFreeMaps()
@@ -1929,26 +2043,29 @@ static void SsFlush(ID3D11DeviceContext* ctx)
     ctx->OMSetDepthStencilState(g_ssDs, 0);
     // 1.65: + the rain map (9) and this frame's lamp shadow face (10): their replays were drawn one by one in the game's
     // pass, each switching the depth target twice (~9 us of GPU each: 40-900 rain + 100 lamp draws a frame)
-    ID3D11DepthStencilView* dsvOf[11] = { g_ssNearDsv, g_ssC1Dsv, g_ssC2Dsv, g_ssFarDsv[0][g_ssFar[0].cur], g_ssFarDsv[1][g_ssFar[1].cur],
+    // 1.80: + the player's car's shape (11 .. 15: from above, the right, the left, the front, the back; carrain.inc)
+    ID3D11DepthStencilView* dsvOf[16] = { g_ssNearDsv, g_ssC1Dsv, g_ssC2Dsv, g_ssFarDsv[0][g_ssFar[0].cur], g_ssFarDsv[1][g_ssFar[1].cur],
                                           g_ssFarDsv[2][g_ssFar[2].cur], g_ssFarDsv[0][g_ssFar[0].cur ^ 1], g_ssFarDsv[1][g_ssFar[1].cur ^ 1],
                                           g_ssFarDsv[2][g_ssFar[2].cur ^ 1], g_rainCur >= 0 ? g_rainDsv[g_rainCur] : 0,
                                           g_lsFace >= 0 && g_lsFaceSlot >= 0 ? g_lsDsv[g_lsFaceSlot * kLsFaces + g_lsFace] : 0 };
+    D3D11_VIEWPORT carVp[5];
+    for (int v = 0; v < 5; ++v) dsvOf[11 + v] = CarMapTarget(v, &carVp[v]);
     static const int kPackOf[9] = { 0, 1, 3, 1, 3, 5, 2, 4, 6 };
     unsigned all = 0;
     for (int i = 0; i < g_ssRecN; ++i) all |= g_ssRec[i].tgts;
     bool lampCut = g_p[P_LAMP_SHADOW_CUT].v > 0.5f;
-    for (int t = 0; t < 11; ++t) {
+    for (int t = 0; t < 16; ++t) {
         if (!((all >> t) & 1) || !dsvOf[t]) continue;
         ctx->OMSetRenderTargets(0, 0, dsvOf[t]);
         float res = t == 9 ? (float)kRainRes : t == 10 ? (float)kLsRes : (float)g_ssRes;
         D3D11_VIEWPORT q = { 0, 0, res, res, 0, 1 };
-        ctx->RSSetViewports(1, &q);
-        ctx->RSSetState(t == 9 ? g_rainRs : t == 10 ? g_lsRs : g_ssRs);
+        ctx->RSSetViewports(1, t >= 11 ? &carVp[t - 11] : &q);
+        ctx->RSSetState(t >= 11 ? g_crRs : t == 9 ? g_rainRs : t == 10 ? g_lsRs : g_ssRs);
         ID3D11InputLayout* curIl = (ID3D11InputLayout*)1; ID3D11VertexShader* curVs = (ID3D11VertexShader*)1; ID3D11PixelShader* curPs = (ID3D11PixelShader*)1;
         for (int i = 0; i < g_ssRecN; ++i) {
             SsRec& r = g_ssRec[i];
             if (!((r.tgts >> t) & 1)) continue;
-            ID3D11Buffer* vp = t == 9 ? RainCbFor(ctx, r.e->vpOff, false) : t == 10 ? LsCbFor(ctx, r.e->vpOff) : SsVpCbFor(ctx, r.e->vpOff, kPackOf[t]);
+            ID3D11Buffer* vp = t >= 11 ? CarMapCbFor(ctx, r.e->vpOff, t - 11) : t == 9 ? RainCbFor(ctx, r.e->vpOff, false) : t == 10 ? LsCbFor(ctx, r.e->vpOff) : SsVpCbFor(ctx, r.e->vpOff, kPackOf[t]);
             if (!vp) continue;
             if (r.il != curIl) { ctx->IASetInputLayout(r.il); curIl = r.il; }
             ctx->IASetVertexBuffers(0, 8, r.vb, r.vbS, r.vbO);
@@ -1964,7 +2081,7 @@ static void SsFlush(ID3D11DeviceContext* ctx)
             if (ps != curPs) { oPSSetShader(ctx, ps, 0, 0); curPs = ps; }
             if (ps) { ctx->PSSetShaderResources(0, 8, r.psrv); ctx->PSSetSamplers(0, 8, r.psmp); ctx->PSSetConstantBuffers(0, 4, r.pcb); }
             Replay(ctx, r.d);
-            if (t >= 9) ++g_ssRecStat[3]; else if (t >= 3) ++g_ssStat.drawsFar; else ++g_ssStat.drawsNear;
+            if (t >= 11) ++g_crBakeDrawn; else if (t >= 9) ++g_ssRecStat[3]; else if (t >= 3) ++g_ssStat.drawsFar; else ++g_ssStat.drawsNear;
         }
     }
     // the game's state again

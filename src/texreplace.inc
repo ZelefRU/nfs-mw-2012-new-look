@@ -294,14 +294,16 @@ static void TxStats()
 // ---- the hooks
 static HRESULT STDMETHODCALLTYPE HkCreateTex2D(ID3D11Device* dev, const D3D11_TEXTURE2D_DESC* d, const D3D11_SUBRESOURCE_DATA* s, ID3D11Texture2D** out)
 {
+    HtScope ht(HT_TEX, HT_TEXDRV, true);   // (1.81d: hitch.inc)
     int bpe; bool bc;
     if (!d || !out || d->ArraySize != 1 || d->SampleDesc.Count != 1 || (d->MiscFlags & D3D11_RESOURCE_MISC_TEXTURECUBE) ||
         (d->BindFlags & (D3D11_BIND_RENDER_TARGET | D3D11_BIND_DEPTH_STENCIL)) || !TxFmt(d->Format, &bpe, &bc) ||
         (!(d->BindFlags & D3D11_BIND_SHADER_RESOURCE) && d->Usage != D3D11_USAGE_STAGING))
-        return oCreateTex2D(dev, d, s, out);
+        { HRESULT r0; HT_CALL(ht, r0 = oCreateTex2D(dev, d, s, out)); return r0; }
     if (!InterlockedExchange(&g_txLockInit, 1)) InitializeCriticalSection(&g_txLock);
     if (!s || !s->pSysMem) {   // made empty, filled later (staging ones too: copied into the real one)
-        HRESULT hr0 = oCreateTex2D(dev, d, s, out);
+        HRESULT hr0;
+        HT_CALL(ht, hr0 = oCreateTex2D(dev, d, s, out));
         if (SUCCEEDED(hr0) && *out) {
             EnterCriticalSection(&g_txLock);
             TxInfo* e = TxFind(*out, true);
@@ -333,7 +335,7 @@ static HRESULT STDMETHODCALLTYPE HkCreateTex2D(ID3D11Device* dev, const D3D11_TE
         if (blob) {
             nd.Format = TxSrgb(nd.Format, TxIsSrgb(d->Format));
             nd.Usage = d->Usage; nd.BindFlags = d->BindFlags; nd.CPUAccessFlags = d->CPUAccessFlags; nd.MiscFlags = d->MiscFlags & ~D3D11_RESOURCE_MISC_GENERATE_MIPS;
-            hr = oCreateTex2D(dev, &nd, sub, out);
+            HT_CALL(ht, hr = oCreateTex2D(dev, &nd, sub, out));
             free(blob);
             if (SUCCEEDED(hr)) { replaced = true; InterlockedIncrement(&g_txReplaced); }
         }
@@ -343,7 +345,7 @@ static HRESULT STDMETHODCALLTYPE HkCreateTex2D(ID3D11Device* dev, const D3D11_TE
             if (said++ < 20) Log("textures: %s could not be used (format / size), the game's kept", path);
         }
     }
-    if (!replaced) hr = oCreateTex2D(dev, d, s, out);
+    if (!replaced) HT_CALL(ht, hr = oCreateTex2D(dev, d, s, out));
     if (SUCCEEDED(hr) && *out) {
         EnterCriticalSection(&g_txLock);
         TxInfo* e = TxFind(*out, true);
@@ -365,6 +367,7 @@ static TxView* TxViewFind(ID3D11ShaderResourceView* v, bool add);
 static void TxViewNote(ID3D11ShaderResourceView* v, ID3D11Texture2D* t, bool srgb);
 static HRESULT STDMETHODCALLTYPE HkCreateSRV(ID3D11Device* dev, ID3D11Resource* r, const D3D11_SHADER_RESOURCE_VIEW_DESC* d, ID3D11ShaderResourceView** out)
 {
+    HtScope ht(HT_SRV, -1, true);   // (1.81d: hitch.inc)
     if (r && out && g_txLockInit) {   // which texture a view shows (a later swap: 1.10)
         D3D11_RESOURCE_DIMENSION dim;
         r->GetType(&dim);
@@ -490,6 +493,7 @@ static void TxApply(ID3D11DeviceContext* ctx, ID3D11Texture2D* t, TxInfo* e)
 
 static void STDMETHODCALLTYPE HkUpdSub(ID3D11DeviceContext* ctx, ID3D11Resource* r, UINT sub, const D3D11_BOX* box, const void* data, UINT rp, UINT dp)
 {
+    HtScope ht(HT_MAP, HT_MAPDRV, false);   // (1.81d: hitch.inc)
     if (g_cbsCopy && sub == 0) CbsOnUpdate(r, box, data);   // an object's constants (worldedit.inc)
     if (g_txLockInit && data && TxIsTex2D(r)) {
         EnterCriticalSection(&g_txLock);
@@ -499,12 +503,14 @@ static void STDMETHODCALLTYPE HkUpdSub(ID3D11DeviceContext* ctx, ID3D11Resource*
         LeaveCriticalSection(&g_txLock);
         if (drop) return;
     }
-    oUpdSub(ctx, r, sub, box, data, rp, dp);
+    HT_CALL(ht, oUpdSub(ctx, r, sub, box, data, rp, dp));
 }
 
 static HRESULT STDMETHODCALLTYPE HkMap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UINT sub, D3D11_MAP type, UINT flags, D3D11_MAPPED_SUBRESOURCE* m)
 {
-    HRESULT hr = oMap(ctx, r, sub, type, flags, m);
+    HtScope ht(HT_MAP, HT_MAPDRV, false);   // (1.81d: hitch.inc)
+    HRESULT hr;
+    HT_CALL(ht, hr = oMap(ctx, r, sub, type, flags, m));
     if (g_cbsCopy && SUCCEEDED(hr) && sub == 0) CbsOnMap(r, type, m);   // an object's constants: written into our copy (worldedit.inc)
     // (1.13: staging textures only: a dynamic one the game rewrites twice a second was hashed at every Unmap, read back
     // from GPU memory: a stutter twice a second, even with NewLook off)
@@ -519,6 +525,7 @@ static HRESULT STDMETHODCALLTYPE HkMap(ID3D11DeviceContext* ctx, ID3D11Resource*
 
 static void STDMETHODCALLTYPE HkUnmap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UINT sub)
 {
+    HtScope ht(HT_MAP, HT_MAPDRV, false);   // (1.81d: hitch.inc)
     if (sub == 0) CbsOnUnmap(r);   // our copy of an object's constants into the driver's memory (worldedit.inc)
     if (sub == 0 && g_txLockInit && TxIsTex2D(r)) {
         EnterCriticalSection(&g_txLock);
@@ -533,7 +540,7 @@ static void STDMETHODCALLTYPE HkUnmap(ID3D11DeviceContext* ctx, ID3D11Resource* 
         }
         LeaveCriticalSection(&g_txLock);
     }
-    oUnmap(ctx, r, sub);
+    HT_CALL(ht, oUnmap(ctx, r, sub));
 }
 
 // a copy from a staging texture whose top level we know: the destination's fingerprint (and its replacement)
@@ -552,11 +559,13 @@ static void TxCopied(ID3D11DeviceContext* ctx, ID3D11Resource* dst, ID3D11Resour
 }
 static void STDMETHODCALLTYPE HkCopyRes(ID3D11DeviceContext* ctx, ID3D11Resource* dst, ID3D11Resource* src)
 {
+    HtScope ht(HT_COPY, -1, false);   // (1.82b: hitch.inc)
     oCopyRes(ctx, dst, src);
     TxCopied(ctx, dst, src);
 }
 static void STDMETHODCALLTYPE HkCopySub(ID3D11DeviceContext* ctx, ID3D11Resource* dst, UINT ds, UINT x, UINT y, UINT z, ID3D11Resource* src, UINT ss, const D3D11_BOX* box)
 {
+    HtScope ht(HT_COPY, -1, false);   // (1.82b: hitch.inc)
     bool drop = false;
     if (g_txLockInit && ds != 0 && TxIsTex2D(dst)) {   // later levels into a texture replaced in place: dropped
         EnterCriticalSection(&g_txLock);
@@ -659,7 +668,7 @@ static ID3D11Texture2D* g_pickStage;
 static ID3D11PixelShader* g_psPickId;
 static ID3D11Buffer* g_pickCb;
 static ID3D11DepthStencilState* g_pickDs;
-struct PickDraw { ID3D11PixelShader* ps; ID3D11Texture2D* tex[16]; };
+struct PickDraw { ID3D11PixelShader* ps; ID3D11Texture2D* tex[16]; ID3D11VertexShader* vs; unsigned char kind; UINT a, b; bool cut; };   // (1.86: + its VS, kind, cut-out)
 static PickDraw* g_pickDraws;
 static int g_pickN;
 static unsigned g_pickFrame;
@@ -699,6 +708,9 @@ static void TxPickAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
             memset(&pd, 0, sizeof(pd));
             ctx->PSGetShader(&pd.ps, 0, 0);
             if (pd.ps) pd.ps->Release();   // (a name only)
+            ctx->VSGetShader(&pd.vs, 0, 0);
+            if (pd.vs) pd.vs->Release();
+            pd.kind = (unsigned char)d.kind; pd.a = d.a; pd.b = d.b; pd.cut = PsIsCut(pd.ps);
             ID3D11ShaderResourceView* sv[16] = {};
             ctx->PSGetShaderResources(0, 16, sv);
             for (int s = 0; s < 16; ++s) {
@@ -734,6 +746,112 @@ static void TxPickAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     }
     for (int k = 0; k < 4; ++k) if (rtv[k]) rtv[k]->Release();
     if (dsv) dsv->Release();
+}
+
+// ---- 1.86: the wind's research. The game's trees have no wind of their own; to sway their leaves a geometry shader would
+// follow their vertex shader (FL 10: SM 4.0 has GS): it must take and give exactly that VS's outputs (the pixel shader
+// reads them by register). The pick logs the draw at the centre (its VS: outputs, constants' slots; its code into
+// NewLook_sky.txt; its kind, instances; its PS, cut-out or not), builds a pass-through GS for that VS's outputs, compiles
+// it and compares its input / output signatures with the VS's; and logs the frame's G-buffer draws grouped by (VS, PS):
+// which shaders draw what is cut out (leaves, grass, fences)
+static const char* kSvName(int sv) { return sv == 1 ? "SV_Position" : sv == 2 ? "SV_ClipDistance" : sv == 3 ? "SV_CullDistance" : 0; }
+static int GsSourceFor(VsInfo* e, char* out, int cap)
+{
+    if (!e || !e->nOut || e->sigAt + e->nOut > 16384) return 0;
+    int n = sprintf(out, "struct V {\n");
+    // (in register order, each its components: the compiler packs them as declared)
+    int order[16], m = e->nOut;
+    for (int i = 0; i < m; ++i) order[i] = i;
+    for (int i = 0; i < m; ++i) for (int j = i + 1; j < m; ++j) {
+        const VsSigEl &a = g_vsSig[e->sigAt + order[i]], &b = g_vsSig[e->sigAt + order[j]];
+        int fa = a.mask & -a.mask, fb = b.mask & -b.mask;
+        if (b.reg < a.reg || (b.reg == a.reg && fb < fa)) { int t = order[i]; order[i] = order[j]; order[j] = t; }
+    }
+    for (int i = 0; i < m && n < cap - 200; ++i) {
+        const VsSigEl& s = g_vsSig[e->sigAt + order[i]];
+        int cnt = 0;
+        for (int b = 0; b < 4; ++b) cnt += (s.mask >> b) & 1;
+        const char* ty = s.type == 1 ? "uint" : s.type == 2 ? "int" : "float";
+        const char* ns = cnt == 2 ? "2" : cnt == 3 ? "3" : cnt == 4 ? "4" : "";
+        char sn[48];
+        if (s.sv == 1) strcpy(sn, "SV_Position");
+        else sprintf(sn, "%s%d", kSvName(s.sv) ? kSvName(s.sv) : s.sem, s.idx);
+        char mn[16];
+        if (s.sv == 1) strcpy(mn, "pos"); else sprintf(mn, "e%d", i);   // (1.87: the position by its name: the wind's GS moves it)
+        n += sprintf(out + n, "    %s%s %s : %s;\n", kSvName(s.sv) && s.sv != 1 ? "float" : ty, ns, mn, sn);
+    }
+    n += sprintf(out + n, "};\n[maxvertexcount(3)]\nvoid gs(triangle V i[3], inout TriangleStream<V> s)\n"
+                          "{\n    [unroll] for (int k = 0; k < 3; ++k) s.Append(i[k]);\n    s.RestartStrip();\n}\n");
+    return n;
+}
+static void PickWindInfo(const PickDraw& pd, int pickNo)
+{
+    VsInfo* e = VsFind(pd.vs, false);
+    static const char* kKinds[] = { "Draw", "DrawIndexed", "DrawInstanced", "DrawIndexedInstanced" };
+    Log("wind pick %d: %s, %u %s, %s %u; PS %p %s (cut-out %d); VS %p: %s, car %d, world: slot %d at %d, view: slot %d at %d, %d outputs",
+        pickNo, pd.kind < 4 ? kKinds[pd.kind] : "?", pd.a, pd.kind == 1 || pd.kind == 3 ? "indices" : "vertices", pd.kind >= 2 ? "instances" : "start", pd.b,
+        pd.ps, PsNameOf(pd.ps), pd.cut, pd.vs, e ? e->what : "?", e ? e->car : -1, e ? e->wSlot : -1, e ? e->wOff : -1, e ? e->vpSlot : -1,
+        e ? e->vpOff : -1, e ? e->nOut : -1);
+    if (!e) return;
+    for (int o = 0; o < e->nOut && e->sigAt + o < 16384; ++o) {
+        const VsSigEl& s = g_vsSig[e->sigAt + o];
+        Log("wind pick %d:   out %s%d  o%d mask %x  type %d  sv %d", pickNo, s.sem, s.idx, s.reg, s.mask, s.type, s.sv);
+    }
+    VsDumpCode(pd.vs, "wind pick: the vertex shader of the draw at the centre");
+    // a pass-through GS for these outputs: compiled, its signatures against the VS's
+    static char src[4096];
+    if (!GsSourceFor(e, src, sizeof(src)) || !g_compile || !g_reflect) { Log("wind pick %d: no GS source", pickNo); return; }
+    ID3DBlob *code = 0, *err = 0;
+    if (FAILED(g_compile(src, strlen(src), "windgs", 0, 0, "gs", "gs_4_0", 0, 0, &code, &err)) || !code) {
+        Log("wind pick %d: the GS did not compile: %s\n%s", pickNo, err ? (const char*)err->GetBufferPointer() : "?", src);
+        if (err) err->Release();
+        return;
+    }
+    ID3D11ShaderReflection* r = 0;
+    int bad = 0;
+    if (SUCCEEDED(g_reflect(code->GetBufferPointer(), code->GetBufferSize(), __uuidof(ID3D11ShaderReflection), (void**)&r)) && r) {
+        D3D11_SHADER_DESC sd;
+        r->GetDesc(&sd);
+        for (int pass = 0; pass < 2; ++pass) {
+            UINT cnt = pass ? sd.OutputParameters : sd.InputParameters;
+            if ((int)cnt != e->nOut) { ++bad; Log("wind pick %d: the GS's %s has %u elements, the VS's outputs %d", pickNo, pass ? "output" : "input", cnt, e->nOut); continue; }
+            for (UINT i = 0; i < cnt; ++i) {
+                D3D11_SIGNATURE_PARAMETER_DESC p;
+                if (FAILED(pass ? r->GetOutputParameterDesc(i, &p) : r->GetInputParameterDesc(i, &p))) { ++bad; continue; }
+                bool found = false;
+                for (int o = 0; o < e->nOut; ++o) {
+                    const VsSigEl& s = g_vsSig[e->sigAt + o];
+                    if (!_stricmp(s.sem, p.SemanticName) && s.idx == p.SemanticIndex && s.reg == p.Register && s.mask == p.Mask) found = true;
+                }
+                if (!found) { ++bad; Log("wind pick %d: the GS's %s %s%u o%u mask %x not as the VS's", pickNo, pass ? "output" : "input", p.SemanticName, p.SemanticIndex, p.Register, p.Mask); }
+            }
+        }
+        r->Release();
+    } else ++bad;
+    code->Release();
+    if (err) err->Release();
+    Log("wind pick %d: a pass-through GS after this VS: %s", pickNo, bad ? "signatures differ (see above)" : "compiles, signatures match: the wind can go in there");
+    // the frame's G-buffer draws by (VS, PS): what draws the cut-out materials
+    struct G { ID3D11VertexShader* vs; ID3D11PixelShader* ps; int n, inst; bool cut; };
+    static G gs[512];
+    int gn = 0;
+    for (int i = 0; i < g_pickN; ++i) {
+        const PickDraw& q = g_pickDraws[i];
+        int k = 0;
+        while (k < gn && !(gs[k].vs == q.vs && gs[k].ps == q.ps)) ++k;
+        if (k == gn) { if (gn >= 512) continue; gs[gn].vs = q.vs; gs[gn].ps = q.ps; gs[gn].n = 0; gs[gn].inst = 0; gs[gn].cut = q.cut; ++gn; }
+        ++gs[k].n;
+        if (q.kind >= 2) ++gs[k].inst;
+    }
+    int shown = 0;
+    for (int k = 0; k < gn && shown < 40; ++k) {
+        if (!gs[k].cut) continue;
+        VsInfo* ve = VsFind(gs[k].vs, false);
+        Log("wind census %d: cut-out: VS %p (%s, %d outputs) PS %p %s: %d draws (%d instanced)%s", pickNo, gs[k].vs, ve ? ve->what : "?", ve ? ve->nOut : -1,
+            gs[k].ps, PsNameOf(gs[k].ps), gs[k].n, gs[k].inst, gs[k].vs == pd.vs && gs[k].ps == pd.ps ? "   <- the picked one" : "");
+        ++shown;
+    }
+    Log("wind census %d: %d G-buffer draws this frame, %d (VS, PS) pairs, %d of them cut-out", pickNo, g_pickN, gn, shown);
 }
 
 // at Present: start a pick, copy its centre, read it and save the textures
@@ -786,6 +904,7 @@ static void TxPickFrame()
                 static int pickNo;
                 ++pickNo;
                 const PickDraw& pd = g_pickDraws[id - 1];
+                PickWindInfo(pd, pickNo);   // 1.86: for the wind in the leaves
                 int saved = 0;
                 for (int s = 0; s < 16; ++s) {
                     if (!pd.tex[s]) continue;

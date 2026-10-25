@@ -31,7 +31,10 @@
 
 static const char* kCloudCommon = R"HLSL(
 // ---- our clouds (sky.inc): shared by the sky draw and the sun pass's cloud shadows
-cbuffer SkyCB : register(b11) { float4 SK0, SK1, SK2, SK3, SK4, SK5, SK6, SK7, SK8, SK9, SK10, SK11; };
+cbuffer SkyCB : register(b11) { float4 SK0, SK1, SK2, SK3, SK4, SK5, SK6, SK7, SK8, SK9, SK10, SK11, SK12; };
+// SK12.x (1.89): how much of the sun a thick cloud deck lets through (SkyOvercastSun; 1: as before)
+// a thick deck (1.89): full cover (rain clouds: more), 0 under ~75%
+float CloudDeck() { return saturate((SK0.y - 0.75) / 0.2) * (0.6 + 0.4 * SK4.z); }
 // SK10 (1.29): our sun (SunPath): towards it (the light's direction); w: by day 1 (0: the game's key light: the moon)
 Texture2D<float> tCloudShadow : register(t50);   // the cloud-shadow map (transmittance)
 // SK0: game clouds more, cover, cloud brightness, time (s)      SK1: city glow colour, strength
@@ -196,34 +199,45 @@ float4 clouds(PSIn i) : SV_Target
         float q = SK4.w;
         float big = lerp(300, 150, q), small = lerp(80, 40, q);
         int maxIt = (int)lerp(72, 160, q);
-        float sigma = 0.012 * (1 + SK4.z * 1.2);
+        float deck = CloudDeck(), sunK = lerp(1, SK12.x, deck);
+        float sigma = 0.012 * (1 + SK4.z * 1.2) * (1 + 0.8 * deck * (1 - SK12.x));   // (1.89: a thick deck: denser)
         float t = t0 + big * jit;
         float T = 1;
         float3 vc = 0;
         int empty = 0;
         bool inCloud = false;
+        // 1.96f (SkyFast, SK12.y): far off the steps grow (x1 to 8 km, x4 at 32 km: a pixel there spans as much); fewer
+        // samples toward the light; out at 2% left (was 1%). 1.96g: 1.96f's (now 2) changed the look (the user's A/B):
+        // its big steps through the gaps missed thin clouds (grain, the bright veil by the sun gone) and its light
+        // samples without the fine detail darkened them. 1: the gaps as before, inside a cloud the longer steps; 4 light
+        // samples by day, 3 at night, all but the last with the detail (as before: all but the 2 furthest)
+        int fastL = (int)(SK12.y + 0.5);
+        int nl = fastL == 0 ? 5 : s.day > 0.5 ? 4 : fastL == 1 ? 3 : 2;
+        int nDet = fastL == 0 ? 3 : fastL == 1 ? nl - 1 : 1;
+        float tEnd = fastL ? 0.02 : 0.01;
         [loop] for (int k = 0; k < maxIt && t < t1; ++k) {
             float3 P = cam + d * t;
+            float grow = fastL ? clamp(t / 8000, 1, 4) : 1, growE = fastL == 2 ? grow : 1;
             if (!inCloud) {
-                if (CloudDensity(P, true, sW) > 0) { inCloud = true; t = max(t - big, t0); empty = 0; continue; }   // back one step
-                t += big;
+                if (CloudDensity(P, true, sW) > 0) { inCloud = true; t = max(t - big * growE, t0); empty = 0; continue; }   // back one step
+                t += big * growE;
                 continue;
             }
             float den = CloudDensity(P, false, sW);
             if (den > 0.003) {
                 empty = 0;
-                // toward the key light: 5 samples, further and further
+                // toward the key light: 5 samples, further and further (to 1 km)
                 float od = 0, seg = 0;
-                [unroll] for (int j = 1; j <= 5; ++j) {
-                    float dist = 40 * j * j;
-                    od += CloudDensity(P + L * dist, j > 3, sW) * (dist - seg);
+                [loop] for (int j = 1; j <= nl; ++j) {
+                    float f = (float)j / nl, dist = 1000 * f * f;
+                    od += CloudDensity(P + L * dist, j > nDet, sW) * (dist - seg);
                     seg = dist;
                 }
                 od *= sigma;
                 // light scattered many times: octaves, each weaker, reaching deeper, less forward (a = b = c = 0.5)
                 float ms = 0, aa = 1, bb = 1, cc = 1;
                 [unroll] for (int o = 0; o < 3; ++o) {
-                    ms += aa * exp(-od * bb) * lerp(lerp(HG(s.cosT, 0.75 * cc), HG(s.cosT, -0.25 * cc), 0.35) * 0.55 + 0.25, 1, 1 - cc);
+                    ms += aa * exp(-od * bb) * lerp(lerp(lerp(HG(s.cosT, 0.75 * cc), HG(s.cosT, -0.25 * cc), 0.35) * 0.55 + 0.25, 1, 1 - cc), 1, deck * 0.85);
                     aa *= 0.5; bb *= 0.5; cc *= 0.5;
                 }
                 float powder = 1 - exp(-den * small * sigma * 2.5);
@@ -232,13 +246,14 @@ float4 clouds(PSIn i) : SV_Target
                 float up = CloudDensity(P + float3(0, 280, 0), true, sW);
                 float ambV = exp(-up * 280 * sigma * 0.5);
                 float h = saturate((P.y - CL0) / (CL1 - CL0) * 3);
-                float3 Li = s.sunC * ms * pw * 2.2 + lerp(s.ambBot, s.ambTop, h) * (0.6 + 0.4 * ambV);
-                float a = 1 - exp(-sigma * den * small);
+                // (1.89: under a thick deck the sun's light is spread (no bright patch round it) and weaker: SkyOvercastSun)
+                float3 Li = s.sunC * ms * pw * 2.2 * sunK + lerp(s.ambBot, s.ambTop, h) * (0.6 + 0.4 * ambV);
+                float a = 1 - exp(-sigma * den * small * grow);
                 vc += T * a * Li;
                 T *= 1 - a;
-                if (T < 0.01) break;
+                if (T < tEnd) break;
             } else if (++empty > 6) inCloud = false;   // out of it: big steps again
-            t += small;
+            t += small * grow;
         }
         float fade = exp(-t0 / 60000) * smoothstep(0.003, 0.05, el);
         T = lerp(1, T, fade);
@@ -307,14 +322,15 @@ float4 main(PSIn i) : SV_Target
     float3 d = s.d;
     float el = d.y;
     // the game's sky (its glow in the true direction)
-    float3 sky = pow(saturate(dot(d, s.L)), SunColour.w) * SunColour.rgb * (1 - SK9.y) + s.grad * BaseCloudColour.w;
+    float sunK = lerp(1, SK12.x, CloudDeck());   // (1.89: the sun's glow and disc behind a thick deck: weaker)
+    float3 sky = pow(saturate(dot(d, s.L)), SunColour.w) * SunColour.rgb * (1 - SK9.y) * sunK + s.grad * BaseCloudColour.w;
     float ov = saturate((SK0.y - 0.55) / 0.45) * saturate(SK0.y * 2);   // heavy cover: the light comes through grey
     sky = lerp(sky, Lum(sky) * float3(0.92, 0.95, 1.0) * (0.9 - SK4.z * 0.35), ov * 0.8);
     sky += s.city * exp(-max(el, 0) * 7) * 0.6;
     // 1.35: our sun's disc (SK9.z its strength, w warmth; towards SK10) and the moon's (SK11): the game's sprite is not drawn
     if (SK9.z > 0) {
         float c = dot(d, normalize(SK10.xyz));
-        sky += lerp(float3(1, 0.96, 0.88), float3(1, 0.42, 0.1), SK9.w) * SK9.z * (smoothstep(0.9999692, 0.9999813, c) * 30 + pow(saturate(c), 3000) * 1.5);
+        sky += lerp(float3(1, 0.96, 0.88), float3(1, 0.42, 0.1), SK9.w) * SK9.z * sunK * sunK * (smoothstep(0.9999692, 0.9999813, c) * 30 + pow(saturate(c), 3000) * 1.5);
     }
     if (SK11.w > 0) {
         float c = dot(d, SK11.xyz);
@@ -377,6 +393,56 @@ static int g_cloudCur;                        // which target is this frame's
 static bool g_cloudHist;                      // the other holds a usable result
 static float g_csOrigin[3];
 static const float kCsTexel = 25;             // m a texel of the shadow map (256: 6.4 km)
+// 1.93: our clouds between the camera and the sun, for the game's corona (sunshadow.inc): the shadow map's texel there
+// read back (a few frames late, never waiting), smoothed
+static float g_csSunHere = 1;
+static ID3D11Texture2D* g_csStage[3];
+static unsigned g_csStageFrame[3];
+static int g_csStageNext;
+static void CsSunHere(ID3D11DeviceContext* ctx)
+{
+    bool on = g_enabled && g_p[P_SKY].v >= 0.5f && g_p[P_SKY + 2].v > 0 && g_p[P_SKY + 8].v > 0 && g_csOk && g_csTex;
+    float want = 1;
+    if (on) {
+        for (int k = 0; k < 3; ++k) {
+            if (!g_csStageFrame[k] || g_frame + 1 - g_csStageFrame[k] < 2 || !g_csStage[k]) continue;
+            D3D11_MAPPED_SUBRESOURCE m;
+            if (ctx->Map(g_csStage[k], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m) != S_OK) continue;
+            float v = HalfToFloat(*(const unsigned short*)m.pData);
+            ctx->Unmap(g_csStage[k], 0);
+            g_csStageFrame[k] = 0;
+            if (v == v) g_csSunHere += ((v < 0 ? 0 : v > 1 ? 1 : v) - g_csSunHere) * 0.15f;
+        }
+        float ts[3] = { -g_sunSky[0], -g_sunSky[1], -g_sunSky[2] };
+        int k = g_csStageNext;
+        if (ts[1] > 0.03f && !g_csStageFrame[k]) {
+            if (!g_csStage[k]) {
+                D3D11_TEXTURE2D_DESC td = {};
+                td.Width = td.Height = 1; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R16_FLOAT; td.SampleDesc.Count = 1;
+                td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                if (FAILED(g_dev->CreateTexture2D(&td, 0, &g_csStage[k]))) g_csStage[k] = 0;
+            }
+            float up = (g_csOrigin[1] - g_cam[3][1]) / ts[1];
+            int tx = (int)floorf((g_cam[3][0] + ts[0] * up - g_csOrigin[0]) / kCsTexel), ty = (int)floorf((g_cam[3][2] + ts[2] * up - g_csOrigin[2]) / kCsTexel);
+            if (g_csStage[k] && tx >= 0 && tx < 256 && ty >= 0 && ty < 256) {
+                D3D11_BOX b = { (UINT)tx, (UINT)ty, 0, (UINT)tx + 1, (UINT)ty + 1, 1 };
+                ctx->CopySubresourceRegion(g_csStage[k], 0, 0, 0, 0, g_csTex, 0, &b);
+                g_csStageFrame[k] = g_frame + 1;
+                g_csStageNext = (k + 1) % 3;
+            }
+        }
+        return;   // (on: only by the read-backs)
+    }
+    g_csSunHere += (want - g_csSunHere) * 0.15f;
+}
+// 1.93: how much of the sun's glow a thick deck lets through (as the sky's CloudDeck x SkyOvercastSun^2)
+static float SkyDeckSunK()
+{
+    bool on = g_enabled && g_p[P_SKY].v >= 0.5f;
+    float cover = on ? g_p[P_SKY + 2].v : 0.0f, deck = (cover - 0.75f) / 0.2f, sk = g_p[236].v;
+    deck = (deck < 0 ? 0 : deck > 1 ? 1 : deck) * (0.6f + 0.4f * g_p[P_SKY + 11].v);
+    return 1 + (sk * sk - 1) * deck;
+}
 static ID3D11Buffer* g_skyCb;
 static ID3D11ShaderResourceView *g_skyW, *g_skyS, *g_skyD;
 static ID3D11PixelShader* g_skyGame[8];   // the game's sky shaders of this kind
@@ -523,7 +589,7 @@ static void SkyCompile()
     }
     free(src);
     D3D11_BUFFER_DESC bd = {};
-    bd.ByteWidth = 192; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    bd.ByteWidth = 208; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     g_dev->CreateBuffer(&bd, 0, &g_skyCb);
     for (int k = 0; k < 2; ++k) {
         D3D11_BUFFER_DESC vb = {};
@@ -547,7 +613,6 @@ static void SkyEnsure() { static bool tried; if (!tried) { tried = true; SkyComp
 static void SkyAfterDraw(ID3D11DeviceContext* ctx)
 {
     if (!g_skyDrawLog) return;
-    g_skyDrawLog = false;
     static bool vsDone;
     if (!vsDone) {
         vsDone = true;
@@ -555,24 +620,38 @@ static void SkyAfterDraw(ID3D11DeviceContext* ctx)
         ctx->VSGetShader(&vs, 0, 0);
         if (vs) { VsDumpCode(vs, "the sky's vertex shader"); vs->Release(); }
     }
+    // 1.82b: read back without waiting (a copy now, read at a later sky draw once the GPU has done it): the read that
+    // waited for the GPU stalled the frame ~70 ms every 30 s (the hitch finder: "Map / Unmap / Update: the driver 70 ms")
+    static ID3D11Buffer* st;
+    static UINT stSize;
+    static bool pending;
+    if (pending) {
+        D3D11_MAPPED_SUBRESOURCE m;
+        if (ctx->Map(st, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m) == S_OK) {
+            const float* f = (const float*)m.pData;
+            Log("sky: game cloud colour %.4f %.4f %.4f %.3f | params %.3f %.3f %.3f %.3f | %.3f %.3f | key light %.2f %.2f %.2f | sun %.4f %.4f %.4f %.1f",
+                f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[12], f[13], f[14], f[16], f[17], f[18], f[19]);
+            ctx->Unmap(st, 0);
+            pending = false;
+            g_skyDrawLog = false;
+        }
+        return;   // (not ready: tried again at the next sky draw)
+    }
+    g_skyDrawLog = false;
     ID3D11Buffer* cb = 0;
     ctx->PSGetConstantBuffers(1, 1, &cb);
     if (!cb) return;
     D3D11_BUFFER_DESC bd;
     cb->GetDesc(&bd);
-    D3D11_BUFFER_DESC sd = {};
-    sd.ByteWidth = bd.ByteWidth; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    ID3D11Buffer* st = 0;
-    if (bd.ByteWidth >= 80 && SUCCEEDED(g_dev->CreateBuffer(&sd, 0, &st))) {
-        ctx->CopyResource(st, cb);
-        D3D11_MAPPED_SUBRESOURCE m;
-        if (SUCCEEDED(ctx->Map(st, 0, D3D11_MAP_READ, 0, &m))) {
-            const float* f = (const float*)m.pData;
-            Log("sky: game cloud colour %.4f %.4f %.4f %.3f | params %.3f %.3f %.3f %.3f | %.3f %.3f | key light %.2f %.2f %.2f | sun %.4f %.4f %.4f %.1f",
-                f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[12], f[13], f[14], f[16], f[17], f[18], f[19]);
-            ctx->Unmap(st, 0);
+    if (bd.ByteWidth >= 80) {
+        if (st && stSize != bd.ByteWidth) { st->Release(); st = 0; }
+        if (!st) {
+            D3D11_BUFFER_DESC sd = {};
+            sd.ByteWidth = bd.ByteWidth; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            if (FAILED(g_dev->CreateBuffer(&sd, 0, &st))) st = 0;
+            stSize = bd.ByteWidth;
         }
-        st->Release();
+        if (st) { ctx->CopyResource(st, cb); pending = true; g_skyDrawLog = true; }
     }
     cb->Release();
 }
@@ -583,7 +662,7 @@ static bool SkyFill(ID3D11DeviceContext* ctx, UINT w = 0, UINT h = 0, ID3D11Buff
 {
     if (!g_skyCb) return false;
     bool on = g_enabled && g_p[P_SKY].v >= 0.5f;
-    float k[48] = {
+    float k[52] = {
         g_p[P_SKY + 1].v, on ? g_p[P_SKY + 2].v : 0.0f, g_p[P_SKY + 3].v, (float)fmod(NowS(), 7200.0),
         1.0f * 0.05f, 0.62f * 0.05f, 0.38f * 0.05f, g_p[P_SKY + 6].v,
         g_p[P_SKY + 7].v, g_p[P_SKY + 5].v, g_p[P_SKY + 4].v, on ? 1.0f : 0.0f,
@@ -596,7 +675,8 @@ static bool SkyFill(ID3D11DeviceContext* ctx, UINT w = 0, UINT h = 0, ID3D11Buff
         g_air.depth && g_skyDepthOk ? 1.0f : 0.0f, g_sunActive && g_p[P_SKY_NIGHT].v > 0.5f ? g_nightF : 0.0f,   // (SK9.y: our night)
         g_sunActive && g_sunG < 0.5f ? g_sunDisc[0] : 0.0f, g_sunDisc[1],                                         // (SK9.zw: our sun's disc)
         -g_sunSky[0], -g_sunSky[1], -g_sunSky[2], g_sunActive ? 1 - g_sunG : 0.0f,     // (1.33: the sun, at night under the horizon)
-        g_moonDisc[0], g_moonDisc[1], g_moonDisc[2], 0.0f };   // (SK11: the moon's disc: 1.37 none, the game's moon moved to ours)
+        g_moonDisc[0], g_moonDisc[1], g_moonDisc[2], 0.0f,     // (SK11: the moon's disc: 1.37 none, the game's moon moved to ours)
+        g_p[236].v, g_p[256].v, 0, 0 };                         // (SK12.x: 1.89: the sun through a thick deck; y: 1.96f the faster march)
     if (probe) {
         k[20] = k[21] = 1.0f / probe; k[22] = 1;   // SK5: the face's own clouds (t10)
         k[28] = 0; k[29] = k[30] = 0.5f;           // SK7: no 2x2 turn (no shift)
@@ -606,7 +686,7 @@ static bool SkyFill(ID3D11DeviceContext* ctx, UINT w = 0, UINT h = 0, ID3D11Buff
     ID3D11Buffer* b = dst ? dst : g_skyCb;
     D3D11_MAPPED_SUBRESOURCE m;
     if (FAILED(ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) return false;
-    memcpy(m.pData, k, 192);
+    memcpy(m.pData, k, 208);
     ctx->Unmap(b, 0);
     return true;
 }
@@ -672,7 +752,7 @@ static bool SkyProbeMake()
     }
     bd.ByteWidth = 240; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     if (FAILED(g_dev->CreateBuffer(&bd, 0, &g_probeVsCb))) { Log("sky probe: no VS constants"); return false; }
-    bd.ByteWidth = 192; bd.Usage = D3D11_USAGE_DYNAMIC; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    bd.ByteWidth = 208; bd.Usage = D3D11_USAGE_DYNAMIC; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     if (FAILED(g_dev->CreateBuffer(&bd, 0, &g_probeSkyCb))) { Log("sky probe: no sky constants"); return false; }
     D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
     sd.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE; sd.TextureCube.MipLevels = (UINT)-1;
@@ -847,6 +927,7 @@ static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
         ctx->PSSetSamplers(9, 1, &g_sPoint);
         D3D11_VIEWPORT mv = { 0, 0, W * sc * 0.5f, H * sc * 0.5f, 0, 1 };   // half the cloud picture: the 2x2 shift is in the shader
         ctx->RSSetViewports(1, &mv);
+        ProfMark(ctx, PR_CLOUDS, 0);   // (1.96f: timed)
         oPSSetShader(ctx, g_cloudPS, 0, 0);
         Replay(ctx, d);
         // the resolve: the quarter-size picture
@@ -856,15 +937,19 @@ static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
         ctx->RSSetViewports(1, &cv);
         oPSSetShader(ctx, g_resolvePS, 0, 0);
         Replay(ctx, d);
+        ProfMark(ctx, PR_CLOUDS, 1);
         ctx->PSSetShaderResources(14, 2, none);
         // the cloud-shadow map
         if (g_csOk) {
             ctx->OMSetRenderTargets(1, &g_csRtv, 0);
             D3D11_VIEWPORT sv = { 0, 0, 256, 256, 0, 1 };
             ctx->RSSetViewports(1, &sv);
+            ProfMark(ctx, PR_CSHADOW, 0);
             oPSSetShader(ctx, g_csPS, 0, 0);
             Replay(ctx, d);
+            ProfMark(ctx, PR_CSHADOW, 1);
         }
+        CsSunHere(ctx);   // (1.93: for the game's corona)
         ProfMark(ctx, PR_PROBE, 0);
         SkyProbePass(ctx, d);   // 1.46: the sky probe for the reflections (a face a frame)
         ProfMark(ctx, PR_PROBE, 1);
@@ -878,6 +963,8 @@ static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
         ctx->PSSetShaderResources(10, 1, &curSrv);
         g_cloudHist = true;
         g_cloudCur ^= 1;
+        ProfMark(ctx, PR_SKYDRAW, 0);   // (1.96f: the sky draw itself, ended in AfterDraw)
+        g_skyDrawTimed = true;
     }
     for (int k = 0; k < 8; ++k) if (rt[k]) rt[k]->Release();
     if (ds) ds->Release();
@@ -892,7 +979,7 @@ static void SkyApplyWeather(int k)
         { 0.4f, 0.55f, 0.2f, 0, 0.85f },   // fair: cumulus
         { 0.65f, 0.6f, 0.1f, 0.15f, 0.85f },  // cloudy
         { 1.0f, 0.12f, 0, 0.35f, 0.9f },   // overcast: a stratus sheet
-        { 0.85f, 0.95f, 0, 1.0f, 0.95f },  // storm: tall dark rain clouds
+        { 0.95f, 0.95f, 0, 1.0f, 1.0f },   // storm: tall dark rain clouds (1.72: denser: 0.85 cover, 0.95 shadows)
         { 0.05f, 0.5f, 0.9f, 0, 0.85f },   // cirrus
     };
     if (k <= 0 || k > 6) return;

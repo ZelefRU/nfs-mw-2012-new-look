@@ -8,7 +8,7 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 
 [Русская версия](README.ru.md) · [Changelog](CHANGELOG.md) · [Known issues / TODO](TODO.md) · [Dev log](docs/DEVLOG.md)
 
-> Version **1.71** (formerly **NFSLight**). Work in progress: it runs and looks good on the author's PC; expect rough edges (see
+> Version **1.96h** (formerly **NFSLight**). Work in progress: it runs and looks good on the author's PC; expect rough edges (see
 > [Known issues](#known-issues)).
 
 ## Features
@@ -44,10 +44,17 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 - Colour grading presets, sharpening (CAS-like), a "photo" look.
 - Parallax on roads, pavements and building walls (heights made from the normal maps), texture replacement.
 
+**Rain, weather, wind** (experimental)
+- Rain drops on the player's car, simulated on its shape: they land, merge, run down and blow back with speed.
+- Wind in the trees' leaves.
+- Weather (rain by hand or by itself, weather kinds, falling rain, splashes, ripples, rain on the lens): in the menu's
+  WEATHER section, **off** in the release while it is being finished.
+
 **Tools**
-- An in-game menu (every setting live, saved to `NewLook.ini`) and 30+ debug views (shadow cascades, AO, reflections,
-  wetness, ...).
-- A built-in benchmark (per-effect GPU cost, also at stored viewpoints).
+- An in-game menu: a simple view (14 sections, each on / off with its main settings) and an advanced one (every
+  setting, live, saved to `NewLook.ini`); quality presets Low / Medium / High / Ultra; 30+ debug views.
+- A built-in benchmark (Ctrl+B, 2-3 min, day and night): each section's cost in ms and its share of the mod's cost,
+  in the menu and in `scripts\NewLook_bench_report.txt`.
 - **World editor** (Ctrl+J): hide, move, turn, scale and copy the game's own objects; props can be baked into the
   game's track files (`worldtools/`), and the city can be edited in Blender (see `worldtools/README.md`).
 - A shader cache: the mod switches on at once after the first start.
@@ -56,8 +63,9 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 - Need for Speed: Most Wanted (2012), PC (tested: the Steam version, `NFS13.exe`).
 - An ASI loader: [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) (included in the release
   as `dinput8.dll`; many NFS MW 2012 mods ship the same one).
-- A D3D11 GPU. Measured on an RTX 3080 at 2560x1440: the mod costs about 5-10 ms of GPU time a frame (more at night
-  with many lamps). Every effect can be switched off or turned down in the menu.
+- A D3D11 GPU. Measured on an RTX 3080 at 2560x1440: the mod costs about 8 ms of GPU time a frame by day, ~15 ms at
+  night with many lamps. Every section can be switched off in the menu; Ctrl+B shows what costs what on your PC.
+- Keep the game's own anti-aliasing off: it renders the frame at 2x, so every effect costs twice as much.
 
 ## Install
 1. Copy the release's contents (`dinput8.dll` and the `scripts` folder) into the game folder, next to `NFS13.exe`.
@@ -80,10 +88,10 @@ the real system D3D11 / DXGI, not ReShade's proxy.
 |---|---|
 | Y | mod on / off |
 | P / Shift+P | menu show / hide / reload the shaders (`NewLook.hlsl`) |
-| I / O, Shift+I / O | select a setting / a group |
+| I / O, Shift+I / O | select a setting / a section |
 | K / L | change the value; J: back to default; H: save all |
 | U | the list of debug views (I / O choose) |
-| B / Ctrl+B | benchmark the selected setting / every effect |
+| Ctrl+B / Shift+B / B | benchmark (every section, day / night) / the selected setting / stop |
 | Ctrl+J | world editor (Ctrl+D copy, Del delete, Ctrl+Z / Ctrl+Y undo / redo) |
 
 ## Files (in `scripts`)
@@ -91,12 +99,12 @@ the real system D3D11 / DXGI, not ReShade's proxy.
 - `NewLook.ini`: the settings.
 - `NewLook_lamps.txt`, `_zones`, `_lamp_presets`, `_lamp_templates`: the lamp map and zones.
 - `NewLook_carlights.txt`: light positions for traffic car models.
-- Written by the mod: `NewLook.log` (send it with a bug report), `NewLook_cache\` (compiled shaders),
-  `NewLook_world.txt` (world editor edits).
+- Written by the mod: `NewLook.log` (send it with a bug report), `NewLook_bench_report.txt` (the benchmark),
+  `NewLook_cache\` (compiled shaders), `NewLook_world.txt` (world editor edits).
 
 ## Known issues
 See [TODO.md](TODO.md). The main ones: far buildings' shadows can still pop or come in ragged where the shadow
-cascades meet; a thin bright outline round cars in some light; trails on fast traffic cars; night cost with many lamps.
+cascades meet; night cost with many lamps; the weather is not finished (off by default).
 
 ## Building from source
 - Visual Studio 2022 Build Tools (x86, C++). `src\build.bat` builds `build\NewLook.asi` (one translation unit:

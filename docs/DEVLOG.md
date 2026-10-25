@@ -1920,3 +1920,716 @@ Waiting for the user's screenshots of the current glitches.
   texels by place, weighted 1/(diff): on a thin thing none was its own, the background's reflection came in. Now a 4x4
   window, the ring weak by place, every texel by exp2(-3 x distance misfit): its own texel wins where there is one.
   Backup src/NewLook_v170b.hlsl.bak. Installed.
+
+## 1.72 (2026-10-24): the player's car in puddles as a plane; puddle rims; a denser storm; TODO refreshed
+- User: the box made a dark cube in the puddle: RayCars is now the player's car only (RN4.w), a flat 1.8 x 4.4 m
+  underside 0.35 m over the floor the ray starts from. Traffic: nothing (it looked fine and the boxes stood out).
+- Puddle rims: Wetness and GlossFix get a band of soaked asphalt round the small puddles (the noise just under the
+  puddle threshold): wet, dark, glossy, not a mirror.
+- Storm preset: cover 0.85 -> 0.95, cloud shadows 0.95 -> 1.0 (re-pick it to apply).
+- Black dots in strong reflections remain (TODO). TODO.md rewritten for 1.72 with the user's answers and the feature
+  list of 2026-10-15 (weather next). Backups src/NewLook_v171.hlsl.bak, src/sky_v171.inc.bak. Installed.
+
+## 1.73 (2026-10-24): no sky glow under the player's car; rain drops and runs on it
+- User (screenshot: a pale blue glow on the wet road under the car). Not our ray only: the game's own lighting lit the
+  wet gloss there with its sky, and our modern-lighting sky term too. UnderPlayer(world): the player's footprint + 0.3 m,
+  soft edges, floor height only: GlossFix's wetness x (1 - 0.85 k), SsrRay's sky x (1 - 0.9 k), PS_Sun's envS
+  x (1 - 0.9 k) on floors.
+- CarRainDrops (200, 0.7, REFLECTIONS; P27.w): on the player's car, with the wet-ground amount, out in the open: round
+  beads on its tops (1.6 cm cells on its body), runs on its sides (0.9 x 7 cm cells sliding down with the frame count);
+  each a small dome: its own sun glint (GGX, rough 0.03), the paint under it 15 % darker.
+- Backups src/NewLook_v172.hlsl.bak, newlook_v172.cpp.bak, menu_v172.inc.bak. All 28 shaders compile.
+
+## 1.73b (2026-10-24, HLSL): car rain drops that look like water
+- User (a reference shot: dense beads, each with a bright sky rim): ours were only dark spots (the glint came from the
+  sun alone). Now: beads of two sizes (1.0 / 1.7 cm cells, random size and place) on every side of the body, runs on
+  the sides; each a dome mirroring the sky (the place's ambient over its albedo, brighter upwards) by Fresnel: a
+  bright rim, a sun pin-point, the paint darker through its middle. Backup src/NewLook_v173.hlsl.bak. Installed.
+
+## 1.74 (2026-10-24): rain drops on the player's car simulated (carrain.inc)
+- User: 1.73b better but far from the goal: the runs a fence sliding and jumping back, jerky (the frame count), drops
+  should behave physically and run against the motion when driving (as NFS Heat / Forza Horizon).
+- carrain.inc: 8192 drops in a 128 x 64 RGBA32F ping-pong state (place on one of five car-local unfoldings: top x z,
+  sides z y, front / back x y; radius; velocity; last place). Once a frame at Present (real dt): rain spawns them
+  (0.4 .. 1.6 mm) and grows them (tops most); pushed by gravity in the car's frame (its tilt), inertia (- its
+  acceleration, from the matrix read-backs, smoothed) and the air (k |w| w / r, w = - its velocity); static friction
+  9.81 (1.7 mm / r)^2 (big drops run, beads hold), sliding friction, viscous damping; water lost along the way; die
+  small, off the body, or by chance (1/240 s). Drawn into an atlas of the unfoldings (2000 x 2250, 4 mm, R16_UINT index,
+  the nearest by SV_Depth) and their paths into a drying trail map (R8, tau 10 s). PS_Sun (t73 .. t76): the nearest
+  drop of the 2 x 2 texels round a pixel, its exact dome / runlet (thinner behind); fine static beads between (the
+  procedural cells), wiped by the trails, blown off at speed (P28: per side, from the speed over 8 m/s); Fresnel sky
+  rim, sun pin-point, darker middle; trails make the paint wetter. No procedural runs any more (the fence).
+- Harness crtest (no game): standing 10 s: 6134 drops, side runs; 25 m/s: top drops blown back (mean -1.45 m/s), top /
+  sides cleared in 3 s; standing again: back to ~5900. All 28 NewLook.hlsl shaders compile.
+- Backups src/NewLook_v173b.hlsl.bak, newlook_v173.cpp.bak, NewLook_v173.asi.bak.
+
+## 1.75 (2026-10-24): car rain drops: water caps that mirror the sky, teardrops with life cycles, denser runs
+- User: the drops did not look real, stuck on vertical sides, little motion or volume. How games do it (Lagarde's
+  "Water drop" series, PBR practice): a drop is a smooth water cap with its own normal; every reflection / highlight by
+  that normal (its top mirrors the bright sky, its bottom the dark ground: the volume), Fresnel rim, the paint darker
+  through it, a caustic on its far side from the light; a dense procedural layer with life cycles plus a flowing layer.
+- Shading: the sky by PanoSky (the reflections' matched sky, clouds) along the drop normal, the ground dark below; the
+  sun as water's GGX highlight (roughness 0.04); a caustic; the paint darker towards the rim. Beads: three sizes (0.7 /
+  1.1 / 1.9 cm cells), teardrops on vertical surfaces (round below, drawn out above), each with its own 40 .. 90 s life
+  (lands, grows ~10 s, stays, goes; real time: LightCB P29.x).
+- Simulation: 16384 drops, spawned on the body's own extent (the car's place is its floor: y 0 .. 1.45, z +-2.4, x +-1)
+  by area; runs from 1.4 mm on vertical sides; runlets up to 2.5 cm. crtest: 12148 on the body standing, ~25-50 running.
+- Backups src/carrain_v174.inc.bak, NewLook_v174.hlsl.bak, newlook_v174.cpp.bak. All shaders compile.
+
+## 1.76 (2026-10-24): car rain drops readable from afar, a debug view; the under-car area rounded and soft
+- User: drops invisible from a distance (want shadows or so), a debug view, the dark rectangle under the car in the
+  puddles with rounded corners and soft edges.
+- Beads: each casts a shadow on the paint (a dark crescent just outside its rim away from the light, a thin dark line
+  where it meets the paint); the paint under drops darker (0.2 .. 0.65 to the rim). Far away (a pixel over ~4 mm of
+  paint, foreshortening counted) the single beads give way to their average: the paint 8 % darker, the sky's sheen of
+  their rims.
+- View 37 (U list, surfaces): "car rain": red simulated drops held, green running, blue fine beads, yellow wet trails.
+- UnderPlayer and RayCars: a rounded rectangle (corners 0.5 / 0.55 m, half 0.9 x 2.2 m) with soft edges (RayCars
+  returns its cover w); the puddle's darkening lerps by it.
+- Backups src/NewLook_v175.hlsl.bak, newlook_v175.cpp.bak, menu_v175.inc.bak. All shaders compile.
+
+## 1.77 (2026-10-24): the player's car followed by place (it was lost now and then); drops on the body only
+- User: now and then the car lost its drops, its shadows and the rest (and showed dark seams: the car's own treatment
+  off); drops showed off the body. Cause: the player's matrix was the frame's FIRST car draw with bones (not a wheel);
+  a traffic car near the camera drawn first was taken for it. Now up to 32 such draws a frame are copied (2 KB staging
+  per frame) and RainBind picks the player's: the nearest to where it was (within 8 m), or, lost for 60 frames, the
+  nearest to the camera. A log line every 900 frames (candidates a frame, the pick's distance, rejects).
+- Drops only inside the body's extent (|x| < 1.05, |z| < 2.45, 0.05 < y < 1.5 m); OnPlayer's box is wider.
+- Backups src/rain_v176.inc.bak, NewLook_v176.hlsl.bak, newlook_v176.cpp.bak, menu_v176.inc.bak.
+
+## 1.78 (2026-10-24): the player's car by its own part's mesh, its matrix of the same frame on the GPU
+- User: 1.77 worse: the car hardly found; when found, the drops slid as if fixed to the road. Causes: (1) the car's
+  parts (doors, bumpers) have their own matrices (other origins): 1.77's "nearest to where it was" jumped between parts;
+  (2) the pose was the read-back's, 2-4 frames old, carried on at its speed: drops slid at speed.
+- Each car draw (bones, not a wheel) gets a mesh key (index / vertex buffers, offsets, range). RainBind picks the
+  player's: its part (the same key) near where the car should be (its last place carried on: within 2.5 m), else the
+  nearest there; lost a second: its key anywhere, else the frame's first car draw (as before 1.77); the key kept.
+  Every frame the draw with that key has its matrix copied on the GPU (DEFAULT buffer, t77; LightCB P29.y = there): the
+  drops, UnderPlayer and RayCars take that pose (PlayerPose), so they ride with the car exactly. The drops' gate is the
+  body's extent by that pose (InPlayerBody). The log line now says whether the GPU matrix was there.
+- Backups src/*_v177.*.bak, NewLook_v177.asi.bak.
+
+## 1.79 (2026-10-24, HLSL): rain beads as lenses in the sun (DriveClub-like)
+- User: the drops ride with the car now (1.78 works); asked for DriveClub-like drops: the shadow not right.
+- A bead in the sun: its shadow is its own footprint moved away from the sun by its height x tan of the sun's angle to
+  the surface (longer when low; up to 2.5 radii), taking the sun's light (0.7) there; inside it the light the bead
+  focuses: a caustic spot (1.4 x the sun); a thin dark line where its rim meets the paint (also in the shade).
+- The bead itself: its mirror at the true Fresnel (a bright arc only where its rim faces the sky; the rims had gone
+  bright all round), the sun's glint; the paint through it a touch darker, its rim dark (0.1 .. 0.7), the sun thinned
+  at its rim.
+- Backup src/NewLook_v178.hlsl.bak. Installed (Shift+P).
+
+## 1.80 (2026-10-24): the car's rain drops by their physics: the car's shape, real merging, running, rain by flux
+- User (1.79): the shadow better, but the drops flat, on the sides too, not merging or running as in rain, too many;
+  asked for the most real behaviour and physics.
+- The car's shape: while a bake is on (every 45 frames), the player's car's draws in the main view (bones, not a
+  wheel; parts within 3.5 m of its own part) are recorded (SsRecord, targets 11 .. 15) and drawn again by SsFlush into
+  a shape map (D32 800 x 900, the atlas' layout at 1 cm) from above, the right, the left, the front and the back
+  (orthographic, by the player's part's matrix of that frame from our copy of its constants); taken (double-buffered)
+  when >= 4 draws went in. CarRainTick flushes at Present. The sim reads depth there: the surface's normal (+-2 cm),
+  whether the body is there; drops run down slopes, go over an edge onto the face they now face (dot with its normal
+  0.08 above the old face's, and the surface there within 3 cm), drip off where the body ends.
+- Merging (1.80's first try lost 85% of the drops: each decided alone): a grid of 16 mm cells, 4 layers (each the
+  smallest index above the layer before: depth peeling with points); a "target" pass writes into which drop each one
+  flows (the biggest bigger one it touches or swept through; only drops stored in the grid), then the sim: a drop
+  dies only if its target flows on nowhere, and that target gathers exactly those (water, momentum, centre).
+- Physics: hold ~ 9.81 (1.4 mm / r)^2 x the paint's own unevenness (value noise 0.5 .. 1.5: they meander, pulled to
+  where it holds less) x (1 - 0.5 wet track: pulled onto it); sliding: kinetic 0.55, the rim's drag 60 (1.5 mm / r)^2
+  /s integrated exactly (steady 2 cm/s .. 1 m/s); air drag 6e-5 |v| v / r along the surface (0.3 in the wake, up over
+  a face it hits); gains water sweeping an unrun path, leaves some on its track; resting in the rain grows in chunks
+  by the rain landing there (up to 2.8 mm); dries with no rain (the sim runs 20 min after); integer hash RNG (the sin
+  hash biased spawns). No random deaths.
+- Rain lands by its flux: the rain past the car (7 m/s down minus the car's velocity) through each face's normal per
+  unit of its unfolding, splashes / spray low on the sides (0.3 + 0.05 x speed m/s); rejection sampling per face;
+  none where a 48 mm square already holds 2 x CarRainDrops drops (the rain joins them instead).
+- Shading (PS_Sun): a cap of contact angle ~80 deg; the overcast sky's soft highlight on its upper side; a drop smaller
+  than the pixel spread over the pixels round it, fainter, as its average (sky ~10%, the sun's glint as a mirror
+  ball's: a quarter of its Fresnel; no more fading to nothing past 3-9 mm pixels); drops stay after the rain / under a
+  roof. View 37 also checks the shape map: green where it meets the surface (3 cm), red not, purple none (P29.z, t78).
+- crtest (analytic car shape: the copy into a depth target does not take, read from a plain texture): first runners
+  ~14 s into heavy rain, ~130 running on the top and ~110 on the sides at 30 s (fastest 1.2 m/s), ~5400 drops; 25 m/s
+  for 5 s: ~1400 moving, blown back, the front takes rain; no rain 20 s: 1% of the water dried. A tick 0.28 ms.
+- MSVC: the HLSL raw string over 16 KB (C2026): split into three.
+- Not verified in the game yet: the bake (the log line "the car's shape baked"; view 37's green / red), that the
+  main view's car shaders take our view matrix as the shadow ones do.
+- Backups src/*_v179.*.bak (+ rain, sunshadow), src/carrain_v180a.inc.bak, NewLook_v180a.hlsl.bak;
+  NewLook_v178.asi.bak, NewLook_v179_installed.hlsl.bak. Installed.
+
+## 1.81 (2026-10-24): the player's car kept; drops on the glass, not in the cabin; the drops' controls
+- User (1.80): the drops work very well now (view 37: the baked shape green on the body); the wet tracks last too long;
+  the car often "lost" (standing too: found, then not); no drops on the glass, some in the cabin seen through it; asked
+  for controls (how much, how readily they run, more).
+- The car lost: the log showed 32.0 car draws a frame (the staging's cap: the player's part could be left out) and the
+  pick took the nearest part when its own was not there (a door, a bumper: own origins: the drops' box, the shape, all
+  off); and CarRainTick cleared every drop after 30 frames without a read-back. Now 64 candidates (with their index
+  counts); its part kept while it is drawn (20 frames), the same part trusted up to 6 m off; a new part only then: the
+  biggest mesh within 2.5 m (the body). The drops pause through a loss (shown by the pose of now), cleared only after 5 s
+  lost, a jump (>= 120 m/s: a reset, a teleport), or the rain long gone. The log: the part's changes, frames without
+  its GPU matrix; the drops' clears and paused frames.
+- Glass / cabin: the glass is not in the G-buffer (the cabin is), but it is in the baked shape. PS_Sun: drops only
+  where the pixel is the body's outer surface (the shape's face meets it within 4 cm); the cabin (under the shape's
+  surface by > 4 cm): the view ray bisected (8 steps) between the cabin point (inside the hull from the five views) and
+  the car's box: the drops of the face crossed there, with that face's normal from the map (+-2 cm) and the pixel size
+  at that distance; no shadows / tracks on the glass; out of the shape (wheels): none. View 37: green on the body, blue
+  on the glass, red none.
+- Controls (RAIN ON THE CAR group, 200 .. 207): CarRainDrops (on, how thick), CarRainLanding (x rain landing and
+  the density cap), CarRainSlide (the paint's hold / x), CarRainSpeed (the running drag / x), CarRainTrail (the track's
+  life, 3 s; was 10), CarRainSize (spawn size, growth cap, chunks x), CarRainWind (the air's drag x), CarRainDry (x).
+- crtest as 1.80 (defaults); a tick 0.25 ms. All shaders compile (lampperf).
+- Backups src/*_v180.*.bak, NewLook_v180.asi.bak, NewLook_v180_installed.hlsl.bak. Installed.
+
+## 1.81b (2026-10-24): the player's car read back through a 16-copy ring; the drops drawn over its glass
+- User (1.81): the car still lost now and then (the drops froze: 1.81's pause; the car's look glitched: dark seams,
+  banded paint: the player car's own treatment off); the drops on the glass there but not seen.
+- The log: "paused 400 .. 1300 frames (the car not seen)" every 30 s, and no "player car:" line in those stretches:
+  the matrix read-back failed for hundreds of frames. It was a ring of 4 staging copies read without waiting from 2
+  frames on: with the GPU 3-4 frames behind (a GPU-bound 60 FPS), each copy was written over before it was ready:
+  never read, as the scene's load went. Now 16 copies.
+- The glass: the game draws it after its lighting, over PS_Sun's drops. Each of its glass draws (a car draw with bones
+  in the main view, blended, within 3.5 m of the player's part of this frame: our copy of its constants) is drawn once
+  more with PS_CarGlass (the 29th shader; kShN), blended dest x (1 - a) + c (colour only): the world place from the
+  glass's own depth and this frame's view ray record (t79), the glass's normal from its triangle, PS_Sun's atlas lookup
+  and the cap's shading (sky mirror, the sky's highlight, the sun's glint, darker through its rim; the average when
+  smaller than the pixel). Our b5 / b13, t67 / 68 (the sky), t73 .. t79, s11 .. 13 bound for it, the game's put back.
+  The log line "car rain: ..." now also says how many glass draws were drawn again.
+- All 29 shaders compile; crtest as before. Backups NewLook_v181a.asi.bak, NewLook_v181a_installed.hlsl.bak. Installed.
+
+## 1.81c (2026-10-24): drops flickering at seams; the read-back without mid-frame flushes; CPU / long frames logged
+- User (1.81b): the car is no longer lost. Drops flicker in places (very often), at edges / seams (a window's sill, a
+  door's gap); big drops in FPS when turning the camera with the mouse.
+- Flicker: drops landing on an edge, a seam or a panel's gap went at once (off the body, over to another face) and
+  landed there again and again. Now no spawns where the shape jumps within 1 cm (> 1.2 cm, or the body ends), and a
+  drop's age rides in S.w (its plane + age / 10, up to 4 s): it fades in over 0.25 s (PS_Sun, PS_CarGlass; its shadow,
+  focused spot and rim line too), so one living a frame or two is not seen.
+- The FPS drops: the log's 10 s timing lines in the slow stretch had every pass (lamps, half-res, snap, reflections,
+  air) 1.5-2x slower at once (the GPU shared / clocked down: other windows over the game?), and one with 39 ms frames
+  on 16 ms of GPU (a CPU stall). Ours that could stall: 1.81b mapped every read-back copy 2+ frames old without waiting
+  (2-3 failed Maps a frame, each making the driver flush mid-frame). Now an event query after each frame's copies
+  (End in RainBind), asked without a flush; only the newest done copy mapped, older ones dropped.
+- The log ("car rain: ...", every 1800 frames) now has the CPU most in a frame of the glass passes, the tick and the
+  read-back, and the frames over 40 ms (the longest): to tell whether a drop in FPS is ours.
+- Note: the Python edits (newline='') turned the edited sources' CRLF into LF (no other change).
+- Backups src/*_v181b.*.bak, NewLook_v181b.asi.bak, NewLook_v181b_installed.hlsl.bak. Installed.
+
+## 1.81d (2026-10-24): the hitch finder; the drops' shaders compiled on a worker
+- User (1.81c): no flicker now; the drops in FPS when turning the camera happen with our effects off too; asked to
+  find what it is, or make a tool for it.
+- The log of 1.81c: with our effects off (GPU 7-8 ms a frame) 77 frames over 40 ms in 30 s, the longest 321 ms: the
+  CPU side (the GPU idle). Once, "the tick 663 ms": our drops' 9 shaders compiled on the render thread when the rain
+  first came; now on a worker (CarRainCompile; no drops for that half second).
+- hitch.inc: per frame (Present to Present) the time inside the game's draws (the driver), ours round them, the PS
+  binds (with our air pass), the making of textures (the driver / ours), views, shaders (the driver / ours), Map /
+  Unmap / UpdateSubresource (the driver / ours), Present (the driver / ours before it); the rest = the game's own and
+  calls not hooked. A frame over 50 ms (and 2.5x the average) logged as "hitch: ..." (2 a second at most); every 1800
+  frames "hitches (the last N frames): ...". TSC stamps (__rdtsc) measured against QPC; ~4 stamps a draw.
+- Not verified in the game yet. Backups src/*_v181c.*.bak, NewLook_v181c.asi.bak. Installed.
+
+## 1.82 (2026-10-24): the weather's state (stage 1 of the weather)
+- weather.inc: rain now (0..1) and cloudiness (0..1), by hand (WeatherRain, WeatherClouds; rain closes the clouds in
+  to >= 0.84) or by itself (WeatherAuto: phases clear, fair, cloudy, overcast, drizzle, rain, heavy rain, WeatherPhase
+  minutes each x 0.6..1.4; the next one a neighbour (sometimes two away) taken Metropolis-wise by each phase's share
+  0.15 / 0.2 / 0.2 / 0.16 / 0.12 / 0.1 / 0.05, off the ends it stays). Clouds move with tau 40 s; rain with tau 20 s
+  and only under clouds over 0.7..0.84 (it comes as they close in, stops before they open).
+- It drives (every frame, the menu showing it): WetGround = the ground's wetness (soaks exponentially, 3 x faster per
+  WeatherSoak minutes, faster in hard rain; dries linearly over WeatherDry minutes); the puddles (Puddles up to 0.85,
+  PuddleWater, PuddleBigWater) by a level filling over WeatherPuddles minutes of rain, draining over 1.5 x WeatherDry;
+  the haze x (1 + 1.2 rain) + 3 x WeatherFog; the sky's cover / type / cirrus / rain bellies / cloud shadows between
+  sky.inc's presets (clear 0, fair 0.3, cloudy 0.55, overcast 0.78, storm 1). The car's drops land only while it rains,
+  by how hard (carrain.inc: g_wxRain; with the weather off, as before by WetGround). The hand-set values of what it
+  drives are kept when it is turned on and put back when off.
+- Menu: WEATHER group (208 .. 216; Weather / WeatherAuto ON / OFF); a "weather: ..." line under the load figures, and
+  the hitch finder's line.
+- wxtest (sped-up time): rain 0.6 by hand: wet 0.88 at 2 min, puddles 0.55 at 4 min; no rain: dry at ~9 min, puddles
+  gone at ~11; by itself 40 h: clear 13 / fair 17 / cloudy 18 / overcast 13 / drizzle 13 / rain 14 / heavy 12 % (before
+  the shares' last trim), raining ~35-39 % of the time; off: every value back as set by hand.
+- Backups src/*_v181d.*.bak, NewLook_v181d.asi.bak, NFSLight_ini_before_182.bak (the ini not changed by us). Installed.
+
+## 1.82b / 1.83 (2026-10-24): the hitch finder's findings; rain falling, splashes, ripples, the wind
+- The hitch finder's log (1.82, a session of ~10 min): (1) every 30 s exactly a ~90 ms frame: "ours round the draws
+  70 ms, Map: the driver 66-71 ms (the longest one 65-70)": SkyAfterDraw's sky-constants log line read its copy back
+  waiting for the GPU (3-4 frames behind): now read without waiting at a later sky draw (sky.inc). (2) Frames of
+  50-150 ms when turning the camera: 40-140 ms of them "the rest" (the game itself, outside every D3D call we hook;
+  our parts a few ms; the driver's Present 10-25 ms: the GPU behind): the game's own, as with our effects off (1.81c).
+  (3) Once 526 ms in the PS binds (our air pass, its first frame: made once). Now also timed: GetData (the game asking
+  its queries: a wait on the GPU would show there), Flush, CopyResource / CopySubresourceRegion.
+- Rain falling (rainfall.inc, NewLook.hlsl VS_Rain / PS_Rain / VS_Splash / PS_Splash; kShN 33), drawn in the air pass:
+  2 x 24000 streak slots (near 14 x 10 x 14 m, far 48 x 24 x 48 m lattices fixed in the world, wrapped round the
+  camera; as many fall as the weather's rain x Rain), each falling 5.5 .. 9 m/s and drifting with the wind; a streak =
+  its path over 1/60 s x RainLength as the camera sees it (the camera's own motion halved: the full one was a star
+  field at 25 m/s; up to 1.2 m), 2 px wide at least (fainter: its light spread), sheltered ones left out (the rain
+  map, one sample), hidden behind the scene (its depth, soft over 0.4 m); lit by the sky above and the light round it
+  (the scene's mips, t80: lamps and headlights make it glint). Splashes: 6000 slots, each a burst of 6 droplets on arcs
+  + a spreading ring for 0.14 s every 0.35 .. 0.75 s, at a new place each time in a 25 m disk round the camera (more
+  near), on the rain map's top surface. Blended dest x (1 - a) + c. The vertex stage gets b5, b13, t51, t79 (saved and
+  put back, with the VS / IA the air pass replays after).
+- Ripples: RainRipple (cells of 14 cm, a drop each per 0.6 .. 1.2 s, fewer in lighter rain; a ridge running out at
+  25 cm/s, fading), its slope added to the reflections' normal on standing water in the open (PS_SSR and its apply).
+- The wind (weather.inc): Wind m/s (+ WindStorm x the weather's rain) towards WindDir, gusts wander its strength and
+  direction; the rain's drift, the car's drops (the air past the car and the rain's flux: carrain.inc). The camera's
+  velocity from its record (P32). LightCB P30 .. P33. Menu: RAIN & WIND (217 .. 225).
+- raintest (1280x720, a street): streaks 0.04-0.05 ms, splashes 0.01 ms of GPU; images checked (rain at 1 / 0.4,
+  camera 0 / 15 / 25 m/s, wind 3 / 8 m/s): slanted streaks, droplet splashes; 1 px streaks came out dotted: 2 px.
+- Not yet: the wind in the trees' leaves (next: find the trees' draws, a vertex-displacement stage after their VS).
+- Backups src/*_v182.*.bak, NewLook_v182.asi.bak, NewLook_v182_installed.hlsl.bak. Installed.
+
+## 1.84 (2026-10-24): the player's car from its draws' constants; the dark patch's switch; splashes on the ground; rain speed; rain on the lens
+- User (1.83): the car still lost now and then, rarely; then the rectangle round it shows (the dark patch under it in
+  the puddles' reflections), sharp body facets, wet-road / rain shading on some parts, shadows and AO broken (its own
+  treatment off: its pose off); asked for a switch for the patch in reflections. Splashes seen in the air at some
+  angles, none on the ground. Asked for the drops' fall speed and rain on the screen, physical, moving with the camera.
+- The log: "paused 300 .. 900 frames (the car not seen)"; its part changed up to 7 times a half minute, 1662 of 1800
+  frames without its part drawn (its key mesh comes and goes: LODs); the read-back's prediction drifted while lost.
+  Now the player's car is found in the same frame from its draws' constants (our CPU copies, WeCbNow): RainPlayerAfterDraw
+  keeps each candidate draw's world matrix (up to 64), RainFrame (once a frame, before the sun pass's constants and
+  wherever the wetness binds first) groups them by matrix (a car's parts on its root share one), takes near where it
+  was (carried on at its speed; 3 m + 0.5 m a frame lost) the group with the most draws (then the most drawn, then the
+  nearest); lost a second: the group with the most draws nearest the camera. Its root = g_playerMat (this frame's: no
+  latency), uploaded to t77 (UpdateSubresource), g_playerKey = its most drawn member (the bake's capture). The old
+  read-back stays as the fallback. The log line: "found from our constants' copies N times (its group: M draws)".
+- UnderCarDark (227, REFLECTIONS): the sky hidden under the player's car (UnderPlayer) on / off.
+- Splashes: only where the rain map's top is no higher than 2 m over the eye, and on the surface seen there (the
+  scene's depth at the splash, from the vertex stage: t17 bound to it; within 0.3 m + 3 %).
+- RainSpeed (226): the streaks' fall x (P32.w); the lens's rain too.
+- Rain on the lens (rainfall.inc LensTick / LensDraw, NewLook.hlsl VS_Lens / PS_Lens, b10 LensCB; kShN 35): up to 400
+  drops in screen heights, simulated on the CPU every frame: landing by the rain's flux into the view (the rain's
+  fall + wind less the camera's velocity, into its forward) + 0.6 (eddies), 6 .. 23 px at 1440 (LensDropSize); gravity
+  along the screen (the camera's tilt), the camera's acceleration (they lag), the air past a moving camera outwards
+  from the centre ~ v^2 / r; held by their rim ~ 1 / r^2; viscous drag; a running one loses a little and draws a
+  thinning trail; touching ones merge; dry with no rain. Each a small lens: the last frame's scene bent through it
+  (inverted, smaller, blurred), its rim dark, a sky highlight. LensDrops (228), LensDropSize (229).
+- raintest: splashes still on the ground with the depth test; the lens: standing 30 s ~50 drops (held), 20 m/s for 3 s
+  ~118 (13 running, blown out); 1 px dots at first (sizes x3). "small" is a macro in the Windows headers (renamed).
+- Built while the game ran (its timings then meaningless): installed by a wait-and-copy when it closes (pending184/).
+  Backups src/*_v183.*.bak, NewLook_v183.asi.bak, NewLook_v183_installed.hlsl.bak.
+
+## 1.85 (2026-10-24): splashes found on the ground; the lens drops lighter, growing, running, fewer in the middle
+- User (1.84): the car not lost any more (driven with the debug view: fine). No splashes on the ground. The lens drops
+  just sit, one now and then runs upwards; wanted fewer in the middle of the view.
+- Splashes: the rain map's top stands ~0.3-0.5 m over the ground (1.83's splashes hung in the air; 1.84's check of
+  the depth dropped them all). Now down the column from 0.3 m over the top to 0.75 m under it (8 steps) the view ray's
+  crossing from passing over the surface to under it, the height interpolated, then checked against the depth there
+  (an edge in front: none). raintest with the map's top 0.4 m high: splashes on the ground again. A little bigger.
+- Lens: the rim dark only at the very edge (1.84 darkened from half the radius: grey discs), the light gathered low
+  inside; the drops grow in the rain (by the flux into the lens), hold radius 0.009 (from 0.016): they run; a running
+  one wanders a little; the air past a moving camera pushes them out to the sides and down (1.84 outwards every way:
+  up above the middle); spawns in the middle 15 % as many (rising to all from 0.25 .. 0.75 of the way out).
+- Backups src/*_v184.*.bak, NewLook_v184.asi.bak, NewLook_v184_installed.hlsl.bak. Installed.
+
+## 1.86 (2026-10-24): the camera record's direction (rain in front, splashes, the lens); a lens switch; the wind's research tool
+- User (1.85): no splashes; the lens drops all crawl up, an odd shape; asked for a switch for them, a small fix, and to
+  focus on the tools the wind in the leaves needs.
+- Cause of all three: the game's camera record holds its view rays pointing back (rel = t1 / (depth - t1.w), that
+  negative; worldedit.inc builds it so, the flare reads forward as -(A + B/2 + C/2), up as +C). RfClip took A + B/2 +
+  C/2 as forward: everything in front of the eye counted as behind (left out), what was behind was drawn mirrored
+  through the eye: 1.83's "splashes in the sky", 1.85's white dots over the sky, the rain in front never drawn; the
+  lens's gravity "down" was up. The test harness ran the forward convention, so it all looked right there. Now forward
+  = sign x (A + B/2 + C/2), the sign from the record's own w (t1.w > 0.5: the game's, back; the harness's t1.w = -1);
+  the lens on the CPU the same (a w of 0, from the world editor's record: the game's). raintest now runs the game's
+  convention too (GAMECONV): streaks to the vanishing point when driving, splashes on the ground, lens drops falling.
+- Lens: LensDropsOn (230, ON / OFF). A running drop drawn as its round head and a thin trail thinning behind it (1.84's
+  tapered capsule made two "ears").
+- The wind's research (Shift+X, the texture picker): it now also logs "wind pick N: ..." for the draw at the screen
+  centre (draw kind, counts / instances, its PS and cut-out or not, its VS: car flags, world / view constants' slots,
+  every output: semantic, register, mask, type), its VS disassembly into NewLook_sky.txt, and builds a pass-through
+  geometry shader for exactly that VS's outputs (GsSourceFor: elements in register order, the compiler packing them as
+  declared), compiles it (gs_4_0) and compares its input / output signatures with the VS's ("the wind can go in there"
+  or what differs); and "wind census N: ..." the frame's G-buffer cut-out draws grouped by (VS, PS) with counts.
+  gstest (offline): plain, packed (TEXCOORD0.xy + TEXCOORD1.zw in one register, TEXCOORD2.xyz + TEXCOORD3.w) and
+  position-last signatures: all compile and match.
+- Backups src/*_v185.*.bak, NewLook_v185.asi.bak, NewLook_v185_installed.hlsl.bak. Installed.
+
+## 1.86b (2026-10-24): the wind in the leaves, preparation step 1: the leaves' draws known
+- Shift+X x3 (user): the leaves = a cut-out PS "DiffuseTextureSampler | diffuseTintCol" with a VS of 3 outputs
+  (SV_Position, TEXCOORD0.xyz, TEXCOORD1.xyz), world in cb1 at 0, 137-193 DrawIndexed a frame; the pass-through GS
+  for it compiles and matches. wind.inc: each main-view draw checked (WindIsLeaves: that PS name, cut-out, 3 outputs,
+  not a car); its VS noted ("wind: a leaves' VS found"), every 1800 frames "wind: the leaves: N VS, M draws a frame".
+  Next (TODO, weather 5): the GS round these draws, the sway. Backups newlook_v186.cpp.bak, NewLook_v186.asi.bak. Installed.
+
+## 1.87 (2026-10-24): the wind in the leaves
+- wind.inc: a leaves' draw (cut-out PS with "diffuseTintCol", its VS with 3 outputs, main view) gets a geometry shader
+  of ours before the game's draw (WindBeforeDraw in BeforeDraw; off again first thing in AfterDraw): built once per VS
+  from its outputs (GsSourceFor, the position named "pos"), it reads the game's VP from the VS's cb0 (at vpOff) and the
+  tree's world from cb1 (at wOff): each vertex's world place from its clip position (the packed VP inverted), moved
+  (sway along the wind x (h over the base / 8 m)^2 in gusts, each tree its phase; flutter: quick small shakes, each leaf
+  its phase), and only the difference added back in clip space (with no wind exactly the game's vertex). The game's own
+  GS there: left alone. WindLeaves (231), WindFlutter (232) in RAIN & WIND (0: off). b2: wind, time, the two settings.
+- The log: "wind: the leaves: N VS, M draws a frame, K with our GS"; "wind: the leaves' GS made for VS ...".
+- windtest (offline): a VS laid out as the game's leaves' (VP in cb0 at 16, world in cb1 at 0, 3 outputs): the GS made.
+- Not yet: the leaves' shadows (their shadow-pass draws) do not sway; the menu's double refresh (user) to look at.
+- Backups src/*_v186b.*.bak, NewLook_v186b.asi.bak. Installed.
+
+## 1.88 (2026-10-25): the rain and the car's drops easier to see; rain lit in the headlights
+- User (1.87): the leaves move, fine (their shadows: not now). The rain hard to see at times, the car's drops only up
+  close; wanted the rain seen in the headlights' cone as in reality, without looking overdone.
+- Streaks: alpha x1.3 (near 1.8, far 0.9), lit a little more by the sky and the scene round them; RainBright (233) x.
+- The car's drops: CarDropsVisible (234, 1.6): a drop's coverage of its pixel x this (far ones, mostly spread over
+  their pixel, are seen; near ones unchanged once covering it), on the glass too.
+- Headlights: in VS_Rain two spots at the player's car's nose (car-local +-0.7, 0.7, 2.2 m along +z, a little down,
+  ~25 deg, ~45 m, 1 / (1 + d^2 / 120)) from its pose (t77, now bound to the vertex stage too); the PS adds warm light x
+  RainHeadlights (235) x 6 / (1 + 30 x the sky's luminance): bright at night, faint by day. LightCB P31.y, P33.x / .w.
+- Backups src/*_v187.*.bak, NewLook_v187.asi.bak, NewLook_v187_installed.hlsl.bak. Installed.
+
+## 1.88b (2026-10-25): the rain in the headlights from the game's own lights; the cost checked
+- User (1.88): the lit drops pure white, not like drops caught in a beam, and lit with the headlights off too.
+- Cause: 1.88's two guessed cones from the car's pose, x6 on a dark sky, and no check that the lights are on.
+- Now VS_Rain lights a drop by the game's own headlight spot (headlight.inc's copy: HeadlightCB b8, pattern t43, s13,
+  bound to the vertex stage in RainfallDraw, restored after): inside its frustum, pattern x the game's attenuation x
+  its colour x 1 / (1 + d^2 / 400), out in TEXCOORD2; PS_Rain adds it x (0.2 + 0.6 x the drop's own random): some
+  drops glint more, tinted by the lamp. P31.y = RainHeadlights only while the game draws its spot (HlOnNow: captured
+  this or last frame), else 0. The t77 pose binding of 1.88 removed from the rain (not needed now).
+- raintest: RainBright (P33.x) was 0 there since 1.88 (no streaks drawn: fixed, P33.x = 1, P33.w = 1.6); HL=1 = the
+  game's spot as logged in 0.62 (att 0 / 0.25 / 10, colour 11.5); HLSL=path overrides the source. Middle of the view
+  (background 0.05): mean 0.0579 -> 0.0604 with the lights, brightest 0.350 -> 0.394 (1.88 was ~x12 that).
+- Cost: rain at 1280x720 splashes 0.014 ms + streaks 0.035 ms (headlights +0.00); windtest now times the leaves' GS:
+  300k triangles +0.09 ms (0.3 ns a triangle; the game's 41-50 leaves draws a frame: well under 0.1 ms).
+  Game log (1.88): car rain CPU tick 0.17-0.28 ms, glass 0.04-0.11, read-back 0.04-0.26; frames GPU-bound (GPU
+  frame 15.8-19.9 ms of 16.7-20.5); mod GPU 7.4-8.7 ms mostly the older passes (half-res 2.2-2.6, sun 2.0, snap
+  1.4-2.0, reflections 1.2-1.6); our CPU round the game's draws 4.5-6.3 ms a frame (sun shadows 1.2, world editor 1.5).
+- Backups src/*_v188.*.bak, NewLook_v188.asi.bak, NewLook_v188_installed.hlsl.bak. Installed.
+
+## 1.89 (2026-10-25): less sun through a thick cloud deck; the weather's kinds (presets), its walk, the change's time
+- User (1.88b, storm by hand): the sun shines through the overcast too strongly (a bright patch round it on the
+  clouds); the world's own light fine. Asked to prepare weather presets: rain variants, dawns with and without haze,
+  clouds flowing between states, with a pattern, and a way to switch the weather / pick one.
+- Sky (sky.inc): CloudDeck() = saturate((cover - 0.75) / 0.2) x (0.6 + 0.4 x rain clouds); SkyOvercastSun (236, 0.3)
+  in SK12.x (SkyCB 192 -> 208 bytes, both buffers). Under a deck: the sun's light in the clouds x lerp(1, it, deck),
+  their phase flattened (x0.85 towards isotropic: no bright patch), extinction x (1 + 0.8 deck (1 - it)); the game's
+  glow behind x the same, our sun's disc x its square. The world's cloud shadows (CloudShadowCalc) untouched.
+- Weather (weather.inc): 12 kinds (clear, clear misty dawn, fair, hazy humid, cloudy, overcast, fog, drizzle, rain,
+  downpour, storm, after the rain): clouds, rain, and x the hand-set: drop size (219), their fall (226), wind (222),
+  gusts (224), haze, the dawn's haze (149); fog (max with WeatherFog), cirrus +. The weather now owns 219 / 222 /
+  224 / 226 / 149 too (kept and put back as the others). WeatherKind (237): 0 by hand (rain / clouds as before), else
+  a kind: picked by hand = there now; by itself it walks the kinds' ways (each kind's next list), weighted by share x
+  the hour (WxTod on our clock, sunshadow.inc WxHourNow: misty dawn 4-9 h only, fog night / morning, storms 13-21 h,
+  stays a fifth), its phase x the kind's minutes; the menu shows where it goes. WeatherChange (238, 2 min): clouds
+  and the kind's values with a time constant of a third of it, the rain half of that (was 40 s / 20 s fixed).
+- wxtest (our clock a day per 2 h, 40 h): clear 12, misty dawn 3 (morning only), fair 25, hazy 11, cloudy 18,
+  overcast 9, fog 2 (mostly morning), drizzle 5, rain 8, downpour 2, storm 1, after 4 %; raining 16 % of the time.
+  Storm picked from clear: clouds 0.56 / 0.90 / 1.00 at 30 / 90 / 210 s, rain 0.81 at 90 s, wind 1.8 -> 6.6 m/s,
+  gusts 0.28 -> 0.80, drops x1.25; weather off: the hand-set values back. The sky's 4 shaders compile (wxtest).
+- Backups src/*_v188b.*.bak, NewLook_v188b.asi.bak, NewLook_v188b_installed.hlsl.bak, NFSLight_ini_before_189.bak.
+  The game was running: installed by a wait-and-copy when it closes (NewLook_v189_pending.*).
+
+## 1.90 (2026-10-25): the rectangle round the car; the player's car picked by its mesh and its place in the view
+- User (1.88b, screenshots: views wetness, reflection source, car rain): a sharp rectangle round / beside the car, in
+  different projections, where wetness and reflections are cut out (UnderCarDark off did not hide it); the car's
+  detection jumps to other cars after changing the car or in a race.
+- Rectangle: OnCar (2.9 x 8.7 m round each car in RC, from 0.06 m over its place) kills wet and puddle in the
+  reflection passes (and relief); the car's place (its root's origin) sits at the road or under it (view 37's red:
+  the road inside InPlayerBody, > 0.05 m over the pose): the road round the car was its "body". Now OnCar from 0.3 m,
+  OnPlayer (history) from 0.2 m, InCabin from 0.4 m (was 0.25).
+- Pick (rain.inc RainFrame): 1.84 when locked took the group with the most draws within 3 m (a rival rubbing or
+  beside, with more parts, won), when lost the car nearest the camera (a parked car at a jack spot). Now: each
+  group's mesh (its biggest draw) and its place in this frame's view (the main view's VP from a car draw's own
+  constants (WeCbNow at vpSlot), clip x, y, w ~ metres): locked: the group with the player's mesh (anywhere: a
+  teleport), else the nearest (draws only a small tie-break); lost: the group nearest the player's place in the view
+  (learnt while followed, quickly near it, slowly when far with no other car there; a chase camera's guess before);
+  within 10 s of finding it again (or its mesh changing) another car steadily (20 frames) within 0.8 m of that place
+  while the picked one is > 2 m off replaces it. Log: "player car: found again", "another car at its place".
+- picktest (new): the player's car followed, a rival 2.5 m beside with 12 parts, rubbing at 1.2 m, a teleport, a new
+  car at a jack spot with a parked car nearer the camera, a wrong pick while the camera was elsewhere: all car 0 (the
+  last replaced after 20 frames); 1.89's rule took the rival from the first case on.
+- Backups src/*_v189.*.bak, NewLook_v189.asi.bak, NewLook_v189_installed.hlsl.bak, NFSLight_ini_before_190.bak.
+  The game was running: installed by a wait-and-copy when it closes.
+
+## 1.91 (2026-10-25): the pick held on a car part (the rectangle all the time); the glow round the sun in a storm
+- User (1.89 / 1.90 screenshots): SkyOvercastSun changes nothing, the sun still glows through a full storm deck; the
+  rectangle by the car now there all the time.
+- Rectangle: the 1.90 log "its group: 1 draws": the pick held by its mesh on a part with its own matrix (a door, a
+  wheel), so the car's pose (t77: UnderPlayer, the boxes, the drops) sat off the car. Now only a group of 3+ draws
+  holds by its mesh, the mesh is only taken from such a group, a part picked moves to the nearest group of 3+ draws
+  within 2 m (not the one with the most: a rival rubbing its side is about as near), the place in the view is learnt
+  only from such a group; locked, the draws' tie-break 0.6 m^2 a draw (was 0.3). Log: "a part's pick moved to its
+  car's root N".
+- Storm glow: from the haze's forward lobe round the sun (AirLight's mie), not from the sky draw (1.89 dimmed only
+  that). Now the lobe x (our clouds' shadow map at the camera toward the sun)^2 x lerp(1, SkyOvercastSun^2, deck);
+  the air pass binds the sky's constants and the cloud shadows (SkyBindForSun). AirLight takes the camera's
+  position (was its height).
+- picktest: rubbing now 1.95 m (1.2 m overlapped the cars; a first try by "the most draws within 2 m" took the rival
+  there); new case: the pick stuck on the car's door (1 draw): car 0 again within 5 frames; all cases car 0.
+  PS_Air / PS_Sun compile (fxc ps_4_0 with the clouds' common code).
+- Backups src/*_v190.*.bak, NewLook_v190.asi.bak, NewLook_v190_installed.hlsl.bak, NFSLight_ini_before_191.bak.
+  The game was running: installed by a wait-and-copy when it closes.
+
+## 1.92 (2026-10-25): no lamps found on screen, no adding lamps by key; the game's sun glare under our clouds
+- User (1.91 screenshots: storm, cover 0.95, SkyOvercastSun 0; a dawn): with the haze off the sun still glows through
+  the clouds, SkyOvercastSun changes nothing, morning or day. Asked: take out the lamps found on screen and the key
+  that adds them to the map (pressed by mistake: "added lamp 4012"), and remove the added ones.
+- Lamps: the log shows 4010 lamps loaded at the start and two added this session (01:12:52, MapAddAtAim twice: 4011,
+  4012, the same place, the last lamp's settings); the map had ~4000 lamps for days (NFSLight.log of 10-24: 3961 ..
+  4020). The two removed from NewLook_lamps.txt (4010 left; before: NewLook_lamps_before_192.txt.bak). Code: the
+  lamps found on screen no longer kept or used (LampsUpdate, MapLearn gone; the finder's pass stays: it brings the
+  camera record and the aim point), lamps used = the map only (LampSource / LampAutoLearn out of the menu), Shift+K /
+  the middle button (add at the aim) and Shift+L (learn the found ones) gone; Shift+J / Del delete and undo stay.
+  Templates (AutoLamps, lamps on every post of a set-up kind) stay.
+- Glare: the game's sun flare glare (VS 1766 / 1803, ours since 1.31) is drawn over the whole frame after the bloom;
+  the game knows the sun as seen from the depth only (the sky there), so our clouds never hid it. Now its light x
+  (our clouds' shadow map at the camera towards the sun, read in the VS, bilinear)^2 x lerp(1, SkyOvercastSun^2,
+  deck) (FlareCB 96 bytes: FL4 the map's origin / texel, FL5.x the deck's factor; t50 bound to the VS and restored).
+  The glare VSs compile (fxc vs_4_0). If a glow stays: the game's corona on its fog shaders (SunCoronaDirection) next.
+- Backups src/*_v191.*.bak, NewLook_v191.asi.bak, NewLook_v191_installed.hlsl.bak, NFSLight_ini_before_192.bak.
+  Installed (the game closed).
+
+## 1.93 (2026-10-25): the game's sun corona (its air scattering) under our clouds
+- User (1.92 screenshot: custom, cover 1.00, SkyOvercastSun 0, the whole sky and the hills washed orange round the
+  sun): the same; the corona, as guessed.
+- SHADERS1.BNDL scanned for "SunCorona" (scratchpad corona_scan.py: DXBC blobs in the zlib streams, D3DDisassemble):
+  6 shaders. 5 PSs (the game's air scattering: gGlobalCB ScattCoeffs / ScatteringColor / ScatteringSettings (0.85,
+  0.0033), some LayerFogCoeffs; one water / reflection one with KeyLightColour): the glow = ScatteringSettings.y /
+  (1 + ScatteringSettings.x dot(view, SunCoronaDirection))^2 x ScatteringColor x the fog's amount, one of them with a
+  16-tap radial blur towards the sun (shafts); the direction used only in that dot. 1 VS: the direction through
+  ViewProjection to the screen (x / w) for the blur's centre.
+- So the corona's direction (our sun since 1.30, CoronaCopy) is now shortened by f = (our clouds' shadow map at the
+  camera towards the sun)^2 x lerp(1, SkyOvercastSun^2, deck), f >= 0.02: the peak (1 / 0.15^2 = 44x the side)
+  flattens into the even haze (f 0: 0.0033 everywhere); the VS's x / w unchanged. The map's texel read back (sky.inc
+  CsSunHere: 1x1 R16F staging ring of 3, DO_NOT_WAIT, smoothed 0.15 a frame; the sky off or no cloud shadows: 1).
+- Backups src/*_v192.*.bak, NewLook_v192.asi.bak, NewLook_v192_installed.hlsl.bak, NFSLight_ini_before_193.bak.
+  Installed (the game closed).
+
+## 1.94 (2026-10-25): the game's own reflections in our sky's colour; the reflected sky from the probe, not old views
+- User (1.93: the corona fixed, "отлично"; screenshot: a glass tower reflecting a sunset in a storm): the game's own
+  reflections stay where ours do not reach; and the reflected sky (our pass) often old: the camera does not show the
+  part of the sky needed.
+- The game's reflections: SHADERS1 scanned for "SkyReflectionAverage": 76 PSs (G-buffer materials: windows
+  (LitWindowColour), walls (MaterialDiffuse, lightmaps), decals; the forward glass with reflection_amount), all with a
+  cube "ReflectionTextureSampler": reflection = cube.rgb x SkyReflectionAverageLight + cube.a x
+  SkyReflectionAverageColour (the game's time of day, no weather), baked into the G-buffer's 4th target (sqrt) or the
+  frame. New skyrefl.inc: the buffer (gGlobalCB, found by reflection: slot and both offsets) swapped at their draws for
+  a copy with both colours = their own luminance x our sky's colour (the sky probe's 1x1 mips of its 6 faces read back
+  every 15 frames, never waiting, smoothed) x a deck's darkening (1 - 0.55 overcast), by GameReflOurSky (239, 1) x
+  our day (1 - the game's key light's share): the night as the game's. Copies cached per buffer (its contents' hash,
+  our values' version). Log: "game's reflections (skyrefl.inc): N shaders, M draws tinted".
+- The reflected sky (PanoSky): the seen panorama now fades with a ~6 s half (was ~60 s); its own detail only while
+  fresh (weight (a - 0.25) x 2, was a x 1.5); the probe's colour matched to the seen sky by how much of it was seen of
+  late (x seen share x 20): nothing seen lately, the probe (our sky now, all round) as drawn.
+- All 28 PSs compile (fxc). Backups src/*_v193.*.bak, NewLook_v193.asi.bak, NewLook_v193_installed.hlsl.bak,
+  NFSLight_ini_before_194.bak. Installed (the game closed).
+
+## 1.95 (2026-10-25): our sun up in the game's night (the clock taken from the moon's azimuth)
+- User (1.94: "стало лучше"; screenshot: the night, lamps lit, sharp sun shadows and sunlit walls): the sun shines at
+  night.
+- Log: 02:35 the game's day ended (21:28, its sun 0.81 -> the moon); 02:35-02:41 its light jumped 5..35 deg many times;
+  each jump took the phase anew from the azimuth ("goes the night's way: its phase 1.000"), our clock 08:30..12:00,
+  our sun up, under "key light 0.0x-0.4, the moon". The moon is off the sun's line (azimuth 56..114, the line about
+  -37.6 +- 35): its azimuth clamps to the line's end = the dawn's turn = morning.
+- Now (sunshadow.inc): not sure of the way and the game's light the moon (under 0.6): no phase from its azimuth: our
+  night kept, else an hour after our sunset (SpPhaseAtHour: the clock's inverse). Sure, and 3 s of the game's moon
+  with our sun over 5 deg (or its strong sun, over 2, with ours 5 deg under): the clock to an hour after our sunset
+  (sunrise), once in 20 s ("sun path: the game's moon while ours is up (..): our clock to ..").
+- suntest: new case (the night, our phase put at noon): our moon within 1 s; its 6 old checks (from 1.30) fail on
+  1.94 as well: the harness is out of date (its moon fixed at azimuth 120, not on a line), to redo.
+- Backups src/*_v194.*.bak; the game was running: installed by a wait-and-copy (NewLook_v195_pending.*).
+
+## 1.96 (2026-10-25): the menu for players (simple / advanced, sections on / off, quality); the quick bench (B); AMD
+- User (Zelef): the menu easier for players (simple settings and an advanced view with every one), each section
+  switched off whole, quality presets, the items regrouped by meaning; extra checks that cost out of the code; a
+  bench players can read (2-3 min, every effect, day and night). Nexus (a Nexus player (AMD)): RX 9060 XT at 1080p, 120 FPS
+  (capped) without the mod, ~15 with it, the game's AA off. Zelef's RTX 3080: slow only with the game's AA on.
+- New sections.inc: 14 sections (sun & moon, sky, weather, shadows, AO & bounce, air, reflections, wet roads,
+  materials, street lamps, car lights, rain effects, wind, colour), each a switch (params 242-255, Sec*) with a
+  "kill" list set to off while it is off; the player's own values kept aside (g_secKeep; the ini and the menu show
+  them: UserVal / UserValue); SecEnforce every frame after WeatherTick (the weather drives some of them), after a key
+  and LoadIni; a setting of a section that is off changed: the section on again. Rain effects off also zeroes the
+  splashes and the puddles' rings (220, 221: they were left on).
+- Quality (240): Low / Medium / High (= the defaults) / Ultra over 24 costly settings (shadow map size and reach,
+  half-res mask, city height map, kept shadows, sky occlusion, bounce, reflection size / rays / early source,
+  clouds, lamp half res / maps / screen shadows / budget / count, shafts, relief, parallax, leaves, lens drops);
+  "custom" when they match none (its values kept: QualityCustom= in the ini).
+- The menu (menu.inc): MenuAdvanced (241) 0 = simple: each section a line (ON / OFF) with its 2-3 main settings in
+  plain words under the selected one; 1 = advanced: a heading per section, the open one's every setting under
+  sub-headings, a window of 26 rows. A line under the menu says what the selected section is. A warning when the
+  game's own AA is on (it draws 2x: 2560x2880 for 2560x1440, every effect costs that much more).
+- Quick bench (bench.inc, B; Ctrl+B the selected setting, Shift+B the old run over every effect): scenes day 13:00,
+  night 23:30 (the map's lamps lit), rain 14:00 (only with WEATHER on: a downpour forced, the ground soaked); per
+  scene windows of ~1.4 s after 0.6 s (presets 1.5 s; a scene 3 s): a reference every third, the mod off, each
+  section that is on switched off, by day each preset; vsync off; medians of the CPU frame, the GPU span, our passes,
+  the wait in Present. A section's cost = the references round it - its window. Report scripts\
+  NewLook_bench_report.txt (the GPU, its driver, the AA warning, a table per scene, the heaviest three, every
+  window); the costs next to the sections in the menu; the log "quick bench:". Ultra skipped under 700 MB free
+  address space.
+- AMD (shaders): fxc showed dcl_indexableTemp (arrays indexed at run time: scratch memory on AMD) in PS_Sun, PS_Snap,
+  PS_Lamps and PS_Tiles, all from LampShade (the 4 strongest lamps in arrays, the zones' values [16], the tile's
+  words [8]), LampGlow (words [8]) and PS_Tiles (words [8], written by index). Rewritten: the 4 in vectors and named
+  variables (selects), the zones as bit masks (a soft edge computed again), the words picked by selects; the 4 soft
+  shadows in a loop instead of 4 copies. fxc: no indexable temps left; PS_Sun 11223 -> 9150 instruction slots,
+  PS_Lamps 3526 -> 1469, PS_Snap 1185 -> 626 (more plain temps: what was in scratch now in registers).
+- CPU per draw: Immediate() remembers the contexts (a wrapper's immediate one, the last deferred one) instead of
+  GetType ~20 times a draw; the wind's "leaves?" kept per pixel shader (the name list was searched at every
+  alpha-tested draw), nothing asked while the wind is off; the game's reflections' tint (skyrefl.inc): the constant
+  buffer's copy's fill number (now unique among all buffers: g_cbsFill) instead of hashing all its bytes at every draw,
+  the last shader's entry kept.
+- The log: every 10 s "cpu:" (an average frame's parts: the game's draws, ours round them, binds, Map, copies,
+  queries, Present (the driver: vsync / GPU queue; ours), the game's own); once "gpu:" (adapter, memory, vendor,
+  driver version, quality, the game's picture size).
+- Builds (C4018 in texreplace.inc as before); all PS variants compile (fxc). Not yet run in game. Backups
+  src/*_v195.*.bak, src/NewLook_v196_before_shaders.hlsl.bak, NewLook_v195.asi.bak, NewLook_v195_installed.hlsl.bak,
+  NFSLight_ini_before_196.bak, TODO_v195.md.bak. The game was running: installed by a wait-and-copy
+  (NewLook_v196_pending.*) when it closed, 19:28.
+
+## 1.96b (2026-10-25): the dawn clock, the moon's shape, sections all off = the game's look, the bench by the game's own clock
+- User (Zelef), 1.96 in game: (1) at 04:30-05:00 by the mod's clock the sun began to rise and the clock went back to
+  01:00; (2) the moon drawn out sideways when the camera turns away from it; (3) every section off and something still
+  changes the picture ("PBR with colour grading"); (4) the bench's day only switched our sun on, the map's lamps stayed
+  lit (the game's night): his report was measured at night; (5) keys: the quick bench on Ctrl+B, the selected setting
+  on Shift+B, the run over every effect taken off (the same as the quick bench).
+- (1) The 1.95 guard (the game's moon while our sun is up: our clock to an hour after sunset) fired at dawn: the log,
+  19:48: ours 4.7 deg up at 04:26 while the game's key light was its moon at 0.50 and rising (0.035 per 10 s; ours
+  0.45 deg per 10 s). Its threshold 5 -> 12 deg (both ways): the game's light passes 0.6 at ~6 deg of ours.
+- (2) VS_Moon (sunshadow.inc kFlareMoon) moved the game's moon quad on the screen by (our moon's place - the game's):
+  the quad kept the perspective stretch of the game's moon's place (near the sides of a 32:9 screen). Now each corner's
+  view ray is turned on the sky by the rotation taking the game's moon to ours (Rodrigues, axis g x o) and projected
+  again (DirUv): the disc's size and shape on the sky kept. fxc vs_4_0: compiles.
+- (3) Settings in PS_Sun's look that no kill list covered (neutral values while the section is off): TIME + 9 -> 1,
+  14 -> 0; SHADOW + 12 -> 1, 13 -> 0, 134 -> 0; AO + 8 -> 1, 15 -> 0, 38 -> 1; REFL + 173 -> 0; WET + 110 -> 1; CARL
+  + 72 -> 1. And SecSunPass(): our sun pass (the game's sun light drawn again by PS_Sun) only while a section drawn in
+  it is on (TIME, SKY, SHADOW, AO, AIR, REFL, WET, MAT, LAMPS, CARL, RAIN); all of them off: the game's own picture
+  (COLOUR's grade, WEATHER, WIND are their own passes). The flare (FlareBefore) needs this frame's camera record:
+  with the pass off it leaves the game's own.
+- (4) New gametime.inc: the game steps its clock at NFS13.exe 0x8B4C28 (movss [esi+0x2A84], xmm0; its environment
+  object, the time 0..86400, its midday 50000; HD Effects hooks 0x8B4C0A / 0x8B4C1A, not this): a 5-byte jump (+3
+  NOPs) to a cave keeping esi and doing the same store (no flags touched: the je at 0x8B4C30 reads cmp 0x8B4C00's).
+  Only when the 8 bytes are the expected ones (log "game time: its clock hooked" or why not). TodGet / TodSet.
+  The quick bench rewritten on it: day = the game's 50000, night = 02:00 (7200), held every frame; rain = midday with
+  a downpour; the time put back after (and on a stop). Clock not found: one scene "now" (the report says so: run it
+  again by day / at night). P_CLOCK / P_LAMP_DAY no longer touched.
+- The bench's windows: a reference before and after each (day: the mod off, each section on but WEATHER / RAIN; the
+  street lamps only at night and last: their shadow maps fill again for seconds after; night: SKY, SHADOW, AIR, CAR
+  LIGHTS, LAMPS; rain: RAIN, WET, REFL), presets at the end of the first scene; a scene settles 4 s, a reference after
+  a window 1.0 s, a preset 1.5 s. A section's cost: max(the CPU frame's, the GPU span's) against the references round
+  it (their mean; the one after far from the one before (6 %, 0.8 ms): the one before alone). The 1.96 report's costs
+  were inflated (the game's own 60 FPS cap hides the CPU frame; the references stayed up after the lamps came back).
+  The report: the game alone with its GPU work (and "its own frame cap" when that is what limits it), the noise, '.'
+  for a section not measured in a scene.
+- Keys: Ctrl+B the quick bench, Shift+B the selected setting (not in the lamp-zone view 24: there it adds a zone), B
+  (with or without them) stops a run; plain B is the game's again. Ctrl+Shift+B (bench viewpoints) and the old run over
+  every effect taken off the keys (the code is still there). The menu's key lines (simple, advanced) said so.
+- The version shown: 1.96b (the log, the menu's title, the report).
+- Builds (C4018 as before). Not yet run in game. Backups src/*_v196.*.bak (sections, bench, menu, sunshadow,
+  newlook.cpp), NewLook_v196.asi.bak, NewLook_v196_installed.hlsl.bak, NFSLight_ini_before_196b.bak, TODO_v196.md.bak.
+  The game was running: installed by a wait-and-copy (NewLook_v196b_pending.*) when it closed, 20:09.
+
+## 1.96c (2026-10-25): our clock by the game's day and night; no moon samples; the bench puts our path back. FPS Unlock tried beside
+- User (Zelef): the FPS cap off before testing: MW2012 FPS Unlock (Krashgamer, Nexus 124 / github.com/Krashgamer/
+  NFSMW2012FpsUnlock, MIT) looked at, integrated "for now" or our own. Read its source (not copied): it replaces the
+  game's frame pacer (NFS13.exe 0xAC82B0: a busy wait for the 60 Hz tick) with ticks owed by real time, render-only
+  frames between; interpolates cars, camera, driver, lamps, props, debris, effects, readouts between the last two
+  ticks; a render-worker barrier, bounds checks, a crash guard, DXGI latency 1, streaming in the tick's order (crashes
+  in tunnels otherwise); borderless window. Its patch sites (0xAC82B0, 0x118371C, 0x10E6D68, 0x11ACDE4, 0xDA07A0,
+  0xDA3710, 0xA5D620.., 0x476FD6, 0x47E1E0, 0x404D00, 0x8C33BC, 0xD97D80, 0xD9BB20, 0x46F987.., 0x41AEF0..,
+  0x534B4D.., 0x791818, 0x7B53C0, 0x49BC60, 0x4A20A0, 0x5F92C5, 0x8E14C0, 0x5356FA, 0x53DB60, 0x4B1F3E, 0xA9A370,
+  0x550252, 0x8A03BA, ...) do not meet ours (0x8B4C28). Chosen with the user: not in our code; its v1.0.0 asi beside
+  ours (the user downloaded it from Nexus: the same 1,088,232-byte zip as the GitHub release): scripts\
+  MW2012FpsUnlock.asi, .ini (VsyncInterval=0: the game shows no vsync setting; Borderless=1), its README and LICENSE;
+  its dinput8.dll (9.7.4) and global.ini not taken (ours: the loader 1.0.0.0 from HD Effects, DontLoadFromDllMain=0).
+  Nothing of it to take out at release. Our eases stepped per frame (faster over 60 FPS): TODO.
+- User: "a rewind" of the clock at some moment. Log 20:46:34: "the game's moon while ours is up (05:32): our clock to
+  an hour after sunset" (01:00): the user's ini has SunriseHour 3.75, SunsetHour 24: our sun up 2 h 15 before the
+  game's comes on (our 06:00): the 1.95 guard (our sun's height, 12 deg in 1.96b) is wrong for any sunrise the player
+  sets before the game's. Now by the game's day and night: SpWellIn(phase, day): 1.5 h of our clock inside them, from
+  the learnt switches (aOn, aOff); the game's moon while our clock is well in its day: to an hour after its sun goes off
+  (aOff + 1/24); its strong sun while ours is well in its night: an hour after it comes on. The not-sure branch at night
+  the same (our phase kept unless well in its day; was: kept only with our moon up, else our sunset + 1 h).
+- And 20:45:53 -> 20:46:03: our clock 03:17 -> 05:17 at once, unlogged; before it "lost the game's day (0.15 off its
+  line)" every ~9 s through the night (20:42-20:45). The game's moon's azimuth is off the sun's line: its samples
+  (within 0.06 of the line) bent the fit (over 3 s of span: its slope) and the shown phase went to the line at once
+  (over 0.1 off). Now: samples, the lost check and the turns by day only (the night runs at the speed kept; the turns
+  looked for anew by day: the dawn's mark is missed after a night, the samples set the line); the at-once move logged.
+- The quick bench put the game's clock back but not our path (its readbacks of the bench's light: "jumped", then the
+  night's way from a day phase). Now our SunPathState kept at its start and put back with the clock; the game's light
+  taken as still 1.5 s after (read back late).
+- "Mod off (Y): the sky and sun look pale, not the game's own": every per-draw change checked: all gated by g_enabled
+  (or by g_sunActive / skyOn, which are); no shader is changed at its making; weather.inc only moves our params;
+  HD Effects changes no colours. At the user's screenshot (20:54:54) our clock 09:28 (sunrise 03:45: our sun 36.5 deg)
+  while the game's own light was its early morning (its phase 0.04, 28.5 deg, key light 2.28 against 6.4 at noon): Y
+  shows the game's own early-morning sky; and its exposure, set for our brighter picture, takes seconds to follow
+  (Y was pressed ~every 0.5 s). Asked the user for an A/B at one time (F8 midday: Y off, and without NewLook.asi).
+- The log's "exception c0000005 at NewLook.asi+2c24f" (20:45:56, the game's AA turned on: 2560x2880): PropScan
+  (proplink.inc, its thread reading the game's memory for lamp posts) met memory the game freed; its __try handles it
+  (the log's vectored handler sees it first). Found with a map file of the same build (identical but for 4
+  timestamp bytes): scratchpad mapbuild.bat (cl ... /link /MAP).
+- The version shown: 1.96c. Builds (C4018 as before). Not yet run in game. Backups src/*_v196b.*.bak (sunshadow,
+  bench, newlook.cpp, menu), NewLook_v196b.asi.bak, NewLook_v196b_installed.hlsl.bak, NFSLight_ini_before_196c.bak.
+  Installed 21:05 (the game closed).
+
+## 1.96d (2026-10-25): our clock is the game's own; the bench's report and night; the weather line's refresh
+- User (Zelef), 1.96c with FPS Unlock, the game's AA off: ~200 FPS without the mod. (1) The clock still jumped (21:xx
+  to 07:00); why move it at all: let it run as the game's, or is it for the bench and F8? (2) The bench's night had
+  daylight. (3) The weather's values in the menu change very often. (4) The bench's way: one section off with all the
+  rest on; would all off and one on be more right? COLOUR alone took 200 -> 185 FPS.
+- (1) Since 1.96b we read the game's clock (gametime.inc, [esi+0x2A84], seconds of its day). Its sun comes on at
+  ~06:00 of it and goes off at ~20:45 (from the azimuth fit: its midday scene 50000 s at phase 0.245, sun on at phase
+  0.92, off 0.535: 05:58 and 20:44): our clock's 06:00 / 20:45 already. Now our clock is the game's: SunPathStep with
+  the clock known (tod = eased && TodKnown()): out = SpPhaseAtHour(game s / 3600 + ClockShift); the azimuth's line,
+  the restarts, the at-once moves and the guards only without it. F8 (HD Effects) and the bench move ours with it, at
+  once. gametime.inc now included before sunshadow.inc. The log: "game time: its sun comes on / goes off at its
+  hh:mm" (to check the 06:00 / 20:45). The log's jump (21:18:58, "the game's sun while our clock is in its night
+  (20:17)") came after 8 F8 presses.
+- (2) The night scene (the game's 02:00) got our clock from the not-sure branch: an hour after the game's sun goes
+  off (21:45), and the user's sunset is 24:00: our sun up. Gone with (1): the night scene is 02:00 on ours.
+- The report said "the game's clock: not found" while the log said "set": QbRestore clears g_qbTodSet before
+  QbReport; now g_qbTodUsed for the report.
+- (3) The menu's text was made anew every 30 frames while the weather ran (7x a second at 200 FPS) besides every 500
+  ms: the frame-counted one taken out.
+- (4) Answered: one off with the rest on is what switching it off saves (the shared work, the sun pass, its copies
+  and half-res buffers, stays with the rest); one on alone would charge the shared work to whichever is alone.
+  Offered an "alone" column as well. COLOUR: 200 -> 185 FPS is 0.4 ms (at 78 FPS the same 0.4 ms is ~2 FPS).
+- Builds. Not yet run in game. Backups src/*_v196c.*.bak (sunshadow, bench, menu, newlook.cpp), NewLook_v196c.asi.bak,
+  NewLook_v196c_installed.hlsl.bak, NFSLight_ini_before_196d.bak. Installed 21:22 (the game closed).
+
+## 1.96e (2026-10-25): each section's share of NewLook's cost; its FPS from its own scene
+- User (Zelef): no "alone" column; show each effect's share in percent. His 1.96d bench (RTX 3080, 2560x1440, the
+  game's AA off, WEATHER off): the game 5.2 / 5.7 ms (day / night), NewLook 13.4 / 20.4 ms (75 / 49 FPS; he sees ~40 at
+  night while driving, the menu open: GPU 24.8 ms there). Lamps 6.1 ms at night, sky 1.4 / 3.4, reflections 1.7, wet
+  1.4, AO 1.1. Off costs more: SUN & MOON -2.2 (day), SHADOWS -1.3 and AIR -1.2 (night). Ultra = High (13.7).
+  The day noise 0.87 ms (references 12.9..14.7).
+- The menu's line showed the street lamps' night cost against the day's FPS ("76 -> 141 FPS off"): now each cost
+  with its scene's frame (g_qbCostSc, g_qbAllMs) and "at night" said; its share of NewLook's whole cost in that scene
+  (g_qbModMs: max of the CPU frame's and the GPU span's difference to the mod off). The report's table: "1.4 ( 17%)".
+- The game's clock: "its sun goes off at its 23:36" twice and "comes on at 13:53" (the bench's jump): 23:36 is not
+  the expected 20:45: F8's dusk? To see over a whole game day without F8.
+- Builds. Backups src/*_v196d.*.bak (bench, menu, newlook.cpp), NewLook_v196d.asi.bak. The game was running:
+  NewLook_v196e_pending.asi, a wait-and-copy installs it when it closes.
+
+## 1.96f (2026-10-25): the sky timed in parts; a cheaper cloud march (SkyFast)
+- User (Zelef): at night ~60 FPS with the sky off, a bit over 40 with it; he likes its look: no visible loss.
+  His SkyCloudRes=2 (80%: the Ultra level, ~2.5x the march pixels of High's 50%), SkyQuality 0.5.
+- The GPU profiler had the sky only as "sky probe": now also "clouds" (the march + resolve, PR_CLOUDS), "cloud shadows"
+  (the 256^2 map, PR_CSHADOW) and "sky" (the sky draw itself: begun at the end of SkyBeforeDraw, ended in AfterDraw by
+  g_skyDrawTimed); in the overlay's mod sum and the bench's kMod.
+- New param 256 SkyFast (default 1, SKY section's advanced list; SK12.y): in clouds() the steps grow far off
+  (x clamp(t/8000,1,4), the alpha by the step's length), 4 samples toward the light by day and 2 at night (were 5,
+  the same 0..1 km spread), only the first with the fine detail (were 3), out at T < 2% (was 1%). 0: as before.
+- fxc clean (clouds, main, resolve, shadowmap); builds. Backups src/*_v196e.*.bak (newlook.cpp, sky, bench, menu,
+  sections), NewLook_v196e.asi.bak, NFSLight_ini_before_196f.bak. Installed 21:47 (the game closed). Not yet run.
+
+## 1.96g (2026-10-25): SkyFast gentler (1.96f's look changed); no white 1-pixel rims on reflections' edges
+- User (Zelef), 1.96f, dusk by the bridge: SkyFast 0: 52.6 FPS, GPU frame 18.31 ms; 1: 62.9 FPS, 15.32 ms (-3 ms).
+  But the look changed: with 1 the bright veil of cloud by the sun was gone, the clouds darker and grainy. The
+  overlay's GPU line ran past the menu (the sky's timings not seen): now wrapped (before "overlay" and "clouds").
+- Why (read from the shots): the grown steps through the gaps skipped thin cloud (the jitter: grain); the light
+  samples without the fine detail made the clouds denser to the sun: darker. SkyFast now 0..2: 1 keeps the gaps'
+  steps as before and grows only inside a cloud, 4 light samples by day / 3 at night, all but the last with the
+  detail; 2 is 1.96f's.
+- User: white 1-pixel outlines with reflections on (a sign's frame and the coffee panel, a bin on the wet road, the
+  918's engine-vent edges); no AA (too dear). The apply (PS_SSRApply) already takes the reflection depth-aware (1.71)
+  and has the paint's ndv floor (1.60); the rim is the grazing Fresnel of an edge-on pixel. New SsrEdges (257, P25.w,
+  REFLECTIONS adv): a pixel off its neighbours' plane (second difference of the 4 neighbours' distances near the first:
+  a step, not a slope, so a far wet road keeps its Fresnel) with a neighbour well behind (3% + 5 cm): f5 and the
+  paint's f5p x (1 - edge). The ground beside a thing (the thing nearer) is not touched (no dark outline).
+- fxc clean (clouds, main; PS_SSRApply with the cloud common in front). Builds. Backups src/*_v196f.*.bak,
+  NewLook_v196f.hlsl.bak, NewLook_v196f.asi.bak, NewLook_v196f_installed.hlsl.bak. The game was running:
+  NewLook_v196g_pending.asi/.hlsl, a wait-and-copy installs them (and NFSLight_ini_before_196g.bak) when it closes.
+
+## 1.96h (2026-10-25): the white 1-pixel rims' real cause: the anti-shimmer at things' edges
+- User (Zelef), 1.96g: SkyFast 1 looks as before: kept. The rims stayed on bins, signs, traffic cars and the 918's
+  vents; he found them gone with "Noise: anti-shimmer" (SpecAA, 173, P22.x) at 0 (and set it to 0).
+- Why: SpecAA (1.43, the sun's and the lamps' highlights) and the SSR ray's roughness (1.45, nVar) widen the lobe by
+  the normal's pixel-to-pixel spread (ddx/ddy of the G-buffer normal). Across a thing's silhouette that spread is the
+  edge (another surface), not bumps: the edge pixels got rough, and a rough reflection there is the blurred bright sky.
+- New DepthStep(i, depth) (the 4 neighbours' distances, the test of 1.96g's SsrEdges without its "behind" side): the
+  spread x (1 - step) in SpecAA (PS_Sun, PS_Lamps) and SsrRay's nVar. The anti-shimmer works on bumpy stones again;
+  ~4 depth reads more per pixel in those passes.
+- fxc clean (PS_Sun, PS_Lamps, PS_SSR, PS_SSRApply; old warnings only). Builds. Backups src/*_v196g.*.bak,
+  NewLook_v196g.hlsl.bak, NewLook_v196g.asi.bak, NewLook_v196g_installed.hlsl.bak. The game was running:
+  NewLook_v196h_pending.asi/.hlsl, a wait-and-copy installs them when it closes.
+

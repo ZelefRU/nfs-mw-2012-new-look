@@ -164,7 +164,9 @@ static void VsDumpCode(ID3D11VertexShader* vs, const char* title)
 }
 static HRESULT STDMETHODCALLTYPE HkCreateVS(ID3D11Device* dev, const void* code, SIZE_T size, ID3D11ClassLinkage* cl, ID3D11VertexShader** out)
 {
-    HRESULT hr = oCreateVS(dev, code, size, cl, out);
+    HtScope ht(HT_SH, HT_SHDRV, true);   // (1.81d: hitch.inc)
+    HRESULT hr;
+    HT_CALL(ht, hr = oCreateVS(dev, code, size, cl, out));
     if (SUCCEEDED(hr) && out && *out && code) {
         VsExamine(code, size, *out);
         CoronaNote(code, size, *out);   // the game's sun corona (sunshadow.inc)

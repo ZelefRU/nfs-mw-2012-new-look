@@ -316,8 +316,12 @@ static void BenchStop()
 }
 
 // one finished frame's GPU numbers (from the profiler, a few frames late: the settle time covers it)
+static void QbSampleGpu(double frameMs, const double* pass);
+static void QbSampleCpu(double ms);
+static void QbTick();
 static void BenchSample(double frameMs, const double* pass)
 {
+    QbSampleGpu(frameMs, pass);   // 1.96: the quick bench
     if (g_padOn) g_padMs = pass[PR_PAD];
     if (g_benchPhase != 3 || frameMs <= 0 || g_sN >= 512) return;
     g_sGpu[g_sN++] = frameMs - (g_padOn ? pass[PR_PAD] : 0);   // the padding's own time out (it wobbles with the clocks)
@@ -326,6 +330,7 @@ static void BenchSample(double frameMs, const double* pass)
 // once a frame (before Present): the CPU frame, our CPU time in it, the game's draws in it
 static void BenchCpu(double ms, double modMs)
 {
+    QbSampleCpu(ms);
     LONG dc = g_drawCnt[0] + g_drawCnt[1] + g_drawCnt[2] + g_drawCnt[3];
     double draws = (double)(dc - g_drawsAtFrame);
     g_drawsAtFrame = dc;
@@ -473,6 +478,7 @@ static void BenchFinish()
 // every frame (Present)
 static void BenchTick()
 {
+    QbTick();   // 1.96: the quick bench
     if (g_benchPhase < 0) return;
     ++g_benchFrame;
     if (g_benchPhase == 0) {   // flying to a viewpoint: the world around it streams in
@@ -530,4 +536,403 @@ static void BenchTick()
     ++g_benchFx;
     if (g_benchOne >= 0) { g_benchFx = 1; }
     BenchNextFx();
+}
+
+// ---------------------------------------------------------------- 1.96: the quick bench (Ctrl+B)
+// For players: what each section (sections.inc) costs here, by day, at night and in the rain (with WEATHER on), and
+// what the quality presets give, in 2-3 minutes, hands off. 1.96b: the game's own clock set (gametime.inc: its midday
+// 50000 s, 02:00 at night; not hooked: as it is now), held each frame; the rain at midday with a downpour forced and the
+// ground soaked. Windows of ~1.4 s after ~0.6 s to settle: everything as set (a reference before and after each
+// window), the mod off, each section that is on switched off in turn (by night those that change at night; in the rain
+// those of the rain), by day the quality presets (last). A window's figures: the median frame (vsync off), the GPU's
+// frame span (timestamps), our passes, the CPU's wait in Present (it waits: the GPU is the limit). A section's cost:
+// the references round it minus its window, by the CPU's frame or the GPU's span, whichever says more (the game's own
+// 60 FPS cap hides the first). A reference after a window that differs much from the one before (a section's caches
+// filling again): the one before alone. The report: NewLook_bench_report.txt (and the log: "quick bench:"); the menu
+// shows each section's cost (the most of the scenes) next to it.
+enum { QB_DAY, QB_NIGHT, QB_RAIN, QB_NOW, QB_SCN };
+static const char* kQbScn[QB_SCN] = { "day", "night", "rain", "now" };
+static const int kQbWinMax = 64;
+static int g_qbPhase = -1;               // -1 idle; 0 a scene settling; 1 a window settling; 2 measuring
+static int g_qbScenes[QB_SCN], g_qbScenesN, g_qbSc;   // the scenes run, the one now (index into g_qbScenes)
+static int g_qbPlan[QB_SCN][kQbWinMax], g_qbPlanN[QB_SCN], g_qbWin;   // windows: -1 reference, -2 the mod off, 0.. a section off, 100 + q a preset
+static double g_qbMs[QB_SCN][kQbWinMax], g_qbGpu[QB_SCN][kQbWinMax], g_qbWait[QB_SCN][kQbWinMax], g_qbMod[QB_SCN][kQbWinMax];
+static double g_qbPhaseT, g_qbStartT;
+static int g_qbFrames;
+static double g_qbS[600], g_qbSW[600], g_qbSG[600], g_qbSM[600];
+static int g_qbSN, g_qbSGN;
+static float g_qbCost[kSecN] = { -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f };
+static char g_qbSummary[3][240];
+static int g_qbCostSc[kSecN];                    // 1.96e: the scene of a section's cost (its most)
+static double g_qbAllMs[QB_SCN], g_qbModMs[QB_SCN];   // 1.96e: per scene: the frame with NewLook, NewLook's whole cost
+static float g_qbQual0[kQualN], g_qbTod0;
+static bool g_qbWasEnabled, g_qbUltraOk, g_qbTodSet, g_qbTodUsed;   // (used: for the report, after the restore)
+static SunPathState g_qbSp;   // 1.96b: our sun path before the bench (put back with the game's clock)
+static int g_qbQualNow;
+
+static double QbNow() { LARGE_INTEGER q; QueryPerformanceCounter(&q); return g_qpf.QuadPart ? (double)q.QuadPart / g_qpf.QuadPart : 0; }
+static const char* QbCostText(int s)
+{
+    static char b[96];
+    float c = g_qbCost[s];
+    if (c < 0.15f) sprintf(b, "costs ~0 here");
+    else {
+        // (1.96e: in the scene it was measured in (the street lamps': the night's, not the day's FPS); its share of
+        // NewLook's whole cost there)
+        int sc = g_qbCostSc[s];
+        double ref = g_qbAllMs[sc], m = g_qbModMs[sc];
+        char pc[24] = "";
+        if (m > 0.3) sprintf(pc, ", %.0f%% of NewLook", 100 * c / m);
+        if (ref > c) sprintf(b, "costs %.1f ms %s%s (%.0f -> %.0f FPS off)", c, sc == QB_NIGHT ? "at night" : "here", pc, 1000 / ref, 1000 / (ref - c));
+        else sprintf(b, "costs %.1f ms %s%s", c, sc == QB_NIGHT ? "at night" : "here", pc);
+    }
+    return b;
+}
+// the adapter, its memory, the driver's version (the report, the log)
+static void GpuDesc(char* out, int n)
+{
+    *out = 0;
+    IDXGIDevice* xd = 0; IDXGIAdapter* ad = 0;
+    if (g_dev && SUCCEEDED(g_dev->QueryInterface(__uuidof(IDXGIDevice), (void**)&xd)) && SUCCEEDED(xd->GetAdapter(&ad))) {
+        DXGI_ADAPTER_DESC d;
+        ad->GetDesc(&d);
+        char name[128];
+        WideCharToMultiByte(CP_ACP, 0, d.Description, -1, name, sizeof(name), 0, 0);
+        LARGE_INTEGER umd = {};
+        bool v = SUCCEEDED(ad->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd));
+        _snprintf(out, n - 1, "%s (%u MB, vendor %04x), driver %u.%u.%u.%u", name, (unsigned)(d.DedicatedVideoMemory >> 20), d.VendorId,
+                  v ? HIWORD(umd.HighPart) : 0, v ? LOWORD(umd.HighPart) : 0, v ? HIWORD(umd.LowPart) : 0, v ? LOWORD(umd.LowPart) : 0);
+        out[n - 1] = 0;
+    }
+    if (ad) ad->Release();
+    if (xd) xd->Release();
+}
+static unsigned FreeAddrMb() { MEMORYSTATUSEX ms; ms.dwLength = sizeof(ms); GlobalMemoryStatusEx(&ms); return (unsigned)(ms.ullAvailVirtual >> 20); }
+
+// a window's setting (and back): the mod, a section, a preset
+static void QbSet(int w, bool on)
+{
+    if (w == -2) g_enabled = on;
+    else if (w >= 0 && w < kSecN) { g_p[P_SEC0 + w].v = on ? 1.0f : 0.0f; SecEnforce(); }
+    else if (w >= 100) {
+        if (!on) QualApply(w - 100);
+        else for (int i = 0; i < kQualN; ++i) *UserVal(kQual[i].p) = g_qbQual0[i];
+    }
+}
+// a scene: the game's clock held at its hour (every frame), the rain
+static void QbScene(int sc)
+{
+    if (g_qbTodSet) TodSet(sc == QB_NIGHT ? 7200.0f : 50000.0f);   // (02:00; its midday)
+    g_qbForceRain = sc == QB_RAIN;
+}
+// a scene's windows: a reference before and after each
+static void QbPlanScene(int sc, bool first)
+{
+    int items[40], ni = 0;
+    if (sc != QB_RAIN) items[ni++] = -2;
+    // the sections: by day all but the rain's (the street lamps not by the game's day: off); at night those that change
+    // at night; in the rain the rain's, the wet ground, the reflections. The street lamps last (their caches fill again
+    // for seconds after)
+    static const int kNight[] = { S_SKY, S_SHADOW, S_AIR, S_CARL };
+    static const int kRain[] = { S_RAIN, S_WET, S_REFL };
+    for (int s = 0; s < kSecN; ++s) {
+        if (s == S_LAMPS || g_p[P_SEC0 + s].v < 0.5f) continue;
+        bool use = false;
+        if (sc == QB_DAY || sc == QB_NOW) use = s != S_WX && s != S_RAIN;
+        else if (sc == QB_NIGHT) { for (int k = 0; k < 4; ++k) use |= kNight[k] == s; }
+        else for (int k = 0; k < 3; ++k) use |= kRain[k] == s;
+        if (use) items[ni++] = s;
+    }
+    if ((sc == QB_NIGHT || sc == QB_NOW) && g_p[P_SEC0 + S_LAMPS].v > 0.5f) items[ni++] = S_LAMPS;
+    int n = 0;
+    g_qbPlan[sc][n++] = -1;
+    for (int i = 0; i < ni; ++i) { g_qbPlan[sc][n++] = items[i]; g_qbPlan[sc][n++] = -1; }
+    if (first)   // the presets (their own figures, no references between)
+        for (int q = 1; q <= 4; ++q) if (q != g_qbQualNow && (q < 4 || g_qbUltraOk)) g_qbPlan[sc][n++] = 100 + q;
+    g_qbPlanN[sc] = n;
+    for (int i = 0; i < n; ++i) g_qbMs[sc][i] = g_qbGpu[sc][i] = g_qbWait[sc][i] = g_qbMod[sc][i] = 0;
+}
+static const char* QbWinName(int w)
+{
+    static char b[64];
+    if (w == -1) return "everything as set";
+    if (w == -2) return "the mod off (the game alone)";
+    if (w >= 100) { sprintf(b, "quality %s", kQualNames[w - 100]); return b; }
+    sprintf(b, "%s off", kSec[w].name);
+    return b;
+}
+
+static void QbRestore()
+{
+    g_enabled = g_qbWasEnabled;
+    for (int i = 0; i < kQualN; ++i) *UserVal(kQual[i].p) = g_qbQual0[i];
+    if (g_qbTodSet) {   // (the game's clock and our path as they were: its light, read back late, held 1.5 s)
+        TodSet(g_qbTod0);
+        g_sp = g_qbSp;
+        g_spHoldUntil = QbNow() + 1.5;
+    }
+    g_qbTodSet = false;
+    g_qbForceRain = false;
+    g_qbHold = false;
+    g_benchUncap = false;
+    SecEnforce();
+}
+static void QbStop(const char* why)
+{
+    if (g_qbPhase < 0) return;
+    int sc = g_qbScenes[g_qbSc];
+    if (g_qbPhase >= 1 && g_qbWin < g_qbPlanN[sc]) QbSet(g_qbPlan[sc][g_qbWin], true);
+    QbRestore();
+    g_qbPhase = -1;
+    sprintf(g_lampMsg, "benchmark %s", why);
+    Log("quick bench: %s", why);
+}
+static void QbStart()
+{
+    if (!g_profOk) { strcpy(g_lampMsg, "benchmark: the GPU timing is not ready yet"); return; }
+    if (g_weOn) WeToggle();
+    g_qbWasEnabled = g_enabled;
+    g_enabled = true;
+    for (int i = 0; i < kQualN; ++i) g_qbQual0[i] = UserValue(kQual[i].p);
+    g_qbQualNow = QualMatch();
+    g_qbUltraOk = FreeAddrMb() > 700;   // (32 bits: Ultra's shadow maps are 256 MB)
+    g_qbTodSet = g_qbTodUsed = TodKnown();
+    g_qbTod0 = TodGet();
+    g_qbSp = g_sp;
+    g_qbScenesN = 0;
+    if (g_qbTodSet) { g_qbScenes[g_qbScenesN++] = QB_DAY; g_qbScenes[g_qbScenesN++] = QB_NIGHT; }
+    else g_qbScenes[g_qbScenesN++] = QB_NOW;   // (the game's clock not found: as it is now)
+    if (g_p[P_WX].v > 0.5f && g_p[P_SEC0 + S_WX].v > 0.5f) g_qbScenes[g_qbScenesN++] = QB_RAIN;
+    for (int k = 0; k < g_qbScenesN; ++k) QbPlanScene(g_qbScenes[k], k == 0);
+    for (int s = 0; s < kSecN; ++s) g_qbCost[s] = -1e9f;
+    g_qbSummary[0][0] = g_qbSummary[1][0] = g_qbSummary[2][0] = 0;
+    g_qbSc = 0;
+    g_qbHold = true;
+    g_benchUncap = true;
+    QbScene(g_qbScenes[0]);
+    g_qbPhase = 0;
+    g_qbStartT = g_qbPhaseT = QbNow();
+    g_qbFrames = 0;
+    char gpu[256];
+    GpuDesc(gpu, sizeof(gpu));
+    int n = 0;
+    for (int k = 0; k < g_qbScenesN; ++k) n += g_qbPlanN[g_qbScenes[k]];
+    Log("quick bench: start: %d scene(s), %d windows; the game's clock %s (%.0f s); %s; screen %ux%u, the game draws %ux%u", g_qbScenesN, n,
+        g_qbTodSet ? "set" : "not found: as it is", g_qbTod0, gpu, g_bbW, g_bbH, g_rtW, g_rtH);
+}
+
+// the samples (BenchCpu, BenchSample)
+static void QbSampleCpu(double ms) { if (g_qbPhase == 2 && g_qbSN < 600) { g_qbS[g_qbSN] = ms; g_qbSW[g_qbSN] = g_benchWaitMs; ++g_qbSN; } }
+static void QbSampleGpu(double frameMs, const double* pass)
+{
+    if (g_qbPhase != 2 || frameMs <= 0 || g_qbSGN >= 600) return;
+    double mod = 0;
+    static const int kMod[] = { PR_COPY, PR_HALF, PR_BLUR, PR_LAMPS, PR_SUN, PR_AIR, PR_LOOK, PR_EARLY, PR_PROBE, PR_SSMASK, PR_CLOUDS, PR_CSHADOW, PR_SKYDRAW };
+    for (int k = 0; k < (int)(sizeof(kMod) / sizeof(kMod[0])); ++k) mod += pass[kMod[k]];
+    g_qbSG[g_qbSGN] = frameMs; g_qbSM[g_qbSGN] = mod; ++g_qbSGN;
+}
+
+// the costs, the report
+// the reference round window i (v: the CPU's frames or the GPU's spans): the ones before and after; the one after far
+// from the one before (caches filling again after the window): the one before alone
+static double QbRef(int sc, int i, double (*v)[kQbWinMax])
+{
+    double a = 0, b = 0;
+    for (int k = i - 1; k >= 0; --k) if (g_qbPlan[sc][k] == -1 && v[sc][k] > 0) { a = v[sc][k]; break; }
+    for (int k = i + 1; k < g_qbPlanN[sc]; ++k) if (g_qbPlan[sc][k] == -1 && v[sc][k] > 0) { b = v[sc][k]; break; }
+    if (a > 0 && b > 0) return fabs(b - a) > (a * 0.06 > 0.8 ? a * 0.06 : 0.8) ? a : (a + b) / 2;
+    return a > 0 ? a : b;
+}
+static double QbCost(int sc, int i)
+{
+    double c = g_qbMs[sc][i] > 0 ? QbRef(sc, i, g_qbMs) - g_qbMs[sc][i] : -1e9, g = g_qbGpu[sc][i] > 0 ? QbRef(sc, i, g_qbGpu) - g_qbGpu[sc][i] : -1e9;
+    return c > g ? c : g;
+}
+static void QbReport()
+{
+    double cost[QB_SCN][kSecN], all[QB_SCN], allG[QB_SCN], off[QB_SCN], offG[QB_SCN], noise[QB_SCN], qual[QB_SCN][5];
+    bool bound[QB_SCN] = {};
+    for (int sc = 0; sc < QB_SCN; ++sc) {
+        all[sc] = allG[sc] = off[sc] = offG[sc] = noise[sc] = 0;
+        for (int s = 0; s < kSecN; ++s) cost[sc][s] = -1e9;
+        for (int q = 0; q < 5; ++q) qual[sc][q] = 0;
+    }
+    for (int k = 0; k < g_qbScenesN; ++k) {
+        int sc = g_qbScenes[k];
+        double rmin = 1e9, rmax = 0, rsum = 0, gsum = 0, wsum = 0;
+        int rn = 0;
+        for (int i = 0; i < g_qbPlanN[sc]; ++i) {
+            int w = g_qbPlan[sc][i];
+            double ms = g_qbMs[sc][i];
+            if (ms <= 0) continue;
+            if (w == -1) { rmin = fmin(rmin, ms); rmax = fmax(rmax, ms); rsum += ms; gsum += g_qbGpu[sc][i]; wsum += g_qbWait[sc][i]; ++rn; }
+            else if (w == -2) { off[sc] = ms; offG[sc] = g_qbGpu[sc][i]; }
+            else if (w >= 100) qual[sc][w - 100] = ms;
+            else cost[sc][w] = QbCost(sc, i);
+        }
+        all[sc] = rn ? rsum / rn : 0;
+        allG[sc] = rn ? gsum / rn : 0;
+        noise[sc] = rn > 1 ? (rmax - rmin) / 2 : 0;
+        bound[sc] = rn && wsum / rn >= 1.0;
+        qual[sc][g_qbQualNow] = all[sc];
+    }
+    double modC[QB_SCN];
+    for (int sc = 0; sc < QB_SCN; ++sc) {
+        modC[sc] = off[sc] > 0 ? fmax(all[sc] - off[sc], allG[sc] - offG[sc]) : 0;
+        g_qbAllMs[sc] = all[sc]; g_qbModMs[sc] = modC[sc];
+    }
+    for (int s = 0; s < kSecN; ++s) {
+        double c = -1e9;
+        g_qbCostSc[s] = g_qbScenes[0];
+        for (int k = 0; k < g_qbScenesN; ++k) if (cost[g_qbScenes[k]][s] > c) { c = cost[g_qbScenes[k]][s]; g_qbCostSc[s] = g_qbScenes[k]; }
+        g_qbCost[s] = (float)c;
+    }
+    int s0 = g_qbScenes[0];
+    // NewLook's whole cost: by the CPU's frame or the GPU's span, whichever says more (the game's own cap: its frame)
+    double modCost = fmax(all[s0] - off[s0], allG[s0] - offG[s0]);
+    bool capped = off[s0] > 0 && offG[s0] > 0 && offG[s0] < off[s0] * 0.85;
+    // the report
+    char path[MAX_PATH];
+    sprintf(path, "%sNewLook_bench_report.txt", g_dir);
+    FILE* f = fopen(path, "w");
+    char gpu[256];
+    GpuDesc(gpu, sizeof(gpu));
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    if (f) {
+        fprintf(f, "NewLook 1.96h benchmark, %04d-%02d-%02d %02d:%02d (it took %.1f min)\n", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, (QbNow() - g_qbStartT) / 60);
+        fprintf(f, "GPU: %s\n", gpu);
+        fprintf(f, "Screen %ux%u; the game draws %ux%u%s\n", g_bbW, g_bbH, g_rtW, g_rtH,
+                (double)g_rtW * g_rtH > 1.3 * g_bbW * g_bbH ? "  <- its ANTI-ALIASING IS ON: every effect costs that much more" : " (its anti-aliasing off)");
+        fprintf(f, "The game's clock: %s\n", g_qbTodUsed ? "set by the bench (day: its midday, night: 02:00), then put back" :
+                "not found (another exe or mod): measured at the time it is now; run it again by day / at night");
+        fprintf(f, "Quality: %s; sections off:", kQualNames[g_qbQualNow]);
+        int offN = 0;
+        for (int s = 0; s < kSecN; ++s) if (g_p[P_SEC0 + s].v < 0.5f) fprintf(f, "%s %s", offN++ ? "," : "", kSec[s].name);
+        fprintf(f, "%s\n\n", offN ? "" : " none");
+        fprintf(f, "Frame time in ms (lower is better), FPS in brackets:%*s", 14, "");
+        for (int k = 0; k < g_qbScenesN; ++k) fprintf(f, "%-16s", kQbScn[g_qbScenes[k]]);
+        fprintf(f, "\n  %-62s", "the game alone (NewLook off)");
+        for (int k = 0; k < g_qbScenesN; ++k) { int sc = g_qbScenes[k]; if (off[sc] > 0) fprintf(f, "%5.1f (%3.0f)     ", off[sc], 1000 / off[sc]); else fprintf(f, "%-16s", "-"); }
+        fprintf(f, "\n  %-62s", "  its GPU work (the GPU's frame span)");
+        for (int k = 0; k < g_qbScenesN; ++k) { int sc = g_qbScenes[k]; if (offG[sc] > 0) fprintf(f, "%5.1f           ", offG[sc]); else fprintf(f, "%-16s", "-"); }
+        fprintf(f, "\n  %-62s", "with NewLook, as set now");
+        for (int k = 0; k < g_qbScenesN; ++k) { int sc = g_qbScenes[k]; fprintf(f, "%5.1f (%3.0f)%s    ", all[sc], all[sc] > 0 ? 1000 / all[sc] : 0, bound[sc] ? " " : "*"); }
+        fprintf(f, "\n  %-62s", "  its GPU work");
+        for (int k = 0; k < g_qbScenesN; ++k) fprintf(f, "%5.1f           ", allG[g_qbScenes[k]]);
+        fprintf(f, "\n  %-62s", "  (the noise: the reference windows' spread, +-)");
+        for (int k = 0; k < g_qbScenesN; ++k) fprintf(f, "%5.2f           ", noise[g_qbScenes[k]]);
+        if (capped) fprintf(f, "\n  (the game alone runs into its own frame cap: what NewLook costs is told by the GPU's work)");
+        fprintf(f, "\n\nWhat each section costs (ms saved when it is switched off, its share of NewLook's cost there; '.' not measured):\n");
+        for (int s = 0; s < kSecN; ++s) {
+            fprintf(f, "  %-62s", kSec[s].name);
+            for (int k = 0; k < g_qbScenesN; ++k) {
+                double c = cost[g_qbScenes[k]][s];
+                if (c < -1e8) fprintf(f, "%-16s", g_p[P_SEC0 + s].v < 0.5f ? "(off)" : ".");
+                else if (fabs(c) <= noise[g_qbScenes[k]] + 0.1) fprintf(f, "%-16s", "~0");
+                else if (modC[g_qbScenes[k]] > 0.3 && c > 0) fprintf(f, "%5.1f (%3.0f%%)    ", c, 100 * c / modC[g_qbScenes[k]]);
+                else fprintf(f, "%5.1f           ", c);
+            }
+            fprintf(f, "\n");
+        }
+        fprintf(f, "\nQuality presets (%s):", kQbScn[s0]);
+        for (int q = 1; q <= 4; ++q) {
+            double ms = qual[s0][q];
+            if (ms > 0) fprintf(f, "   %s %.1f ms (%.0f FPS)%s", kQualNames[q], ms, 1000 / ms, q == g_qbQualNow ? " <- now" : "");
+            else if (q == 4 && !g_qbUltraOk) fprintf(f, "   Ultra: not tried (little address space left)");
+        }
+        fprintf(f, "\n\n");
+        // the heaviest three
+        int top[3] = { -1, -1, -1 };
+        for (int t = 0; t < 3; ++t)
+            for (int s = 0; s < kSecN; ++s) {
+                if (g_qbCost[s] < 0.3f || s == top[0] || s == top[1]) continue;
+                if (top[t] < 0 || g_qbCost[s] > g_qbCost[top[t]]) top[t] = s;
+            }
+        if (top[0] >= 0) {
+            fprintf(f, "The heaviest here:");
+            for (int t = 0; t < 3; ++t) if (top[t] >= 0) fprintf(f, "%s %s %.1f ms", t ? "," : "", kSec[top[t]].name, g_qbCost[top[t]]);
+            fprintf(f, ".\nSwitch them off (or lower Quality) for more FPS: the menu's sections each have an on / off line.\n");
+        } else fprintf(f, "No section costs much here.\n");
+        if (!bound[s0])
+            fprintf(f, "* the GPU was not the limit (the CPU, the game's own frame cap or a limiter in the driver): the costs show only in part.\n");
+        if (modCost > 0) {
+            double sum = 0;
+            for (int s = 0; s < kSecN; ++s) if (cost[s0][s] > 0) sum += cost[s0][s];
+            fprintf(f, "(By %s NewLook costs %.1f ms; its sections' costs add up to %.1f ms: some work they share, some only one of them saves.)\n",
+                    kQbScn[s0], modCost, sum);
+        }
+        fprintf(f, "\nEvery window (ms; GPU frame span; mod passes on the GPU; the CPU's wait in Present):\n");
+        for (int k = 0; k < g_qbScenesN; ++k) {
+            int sc = g_qbScenes[k];
+            for (int i = 0; i < g_qbPlanN[sc]; ++i)
+                fprintf(f, "  %-6s %-56s %6.2f  %6.2f  %6.2f  %5.2f\n", kQbScn[sc], QbWinName(g_qbPlan[sc][i]), g_qbMs[sc][i], g_qbGpu[sc][i], g_qbMod[sc][i], g_qbWait[sc][i]);
+        }
+        fclose(f);
+    }
+    // the menu's lines
+    sprintf(g_qbSummary[0], "benchmark (%s): the game alone %.1f ms (%.0f FPS%s), with NewLook %.1f ms (%.0f FPS): NewLook costs %.1f ms%s", kQbScn[s0],
+            off[s0], off[s0] > 0 ? 1000 / off[s0] : 0, capped ? ", its cap" : "", all[s0], all[s0] > 0 ? 1000 / all[s0] : 0, modCost,
+            bound[s0] ? "" : "  (* not GPU-bound)");
+    char* q = g_qbSummary[1];
+    q += sprintf(q, "   quality:");
+    for (int k = 1; k <= 4; ++k) if (qual[s0][k] > 0) q += sprintf(q, "  %s %.0f FPS", kQualNames[k], 1000 / qual[s0][k]);
+    for (int k = 1; k < g_qbScenesN; ++k) {
+        int s1 = g_qbScenes[k];
+        q += sprintf(q, "      %s: %.0f FPS", kQbScn[s1], all[s1] > 0 ? 1000 / all[s1] : 0);
+    }
+    sprintf(g_qbSummary[2], "   the costs are next to the sections; all of it in scripts\\NewLook_bench_report.txt");
+    Log("quick bench: done in %.1f min -> %s", (QbNow() - g_qbStartT) / 60, path);
+    Log("quick bench: %s | %s", g_qbSummary[0], g_qbSummary[1]);
+    for (int s = 0; s < kSecN; ++s) if (g_qbCost[s] > -1e8f) Log("quick bench:   %-44s %+.2f ms", kSec[s].name, g_qbCost[s]);
+}
+
+// every frame (BenchTick)
+static void QbTick()
+{
+    if (g_qbPhase < 0) return;
+    ++g_qbFrames;
+    double t = QbNow() - g_qbPhaseT;
+    int sc = g_qbScenes[g_qbSc];
+    QbScene(sc);   // (kept: the game's clock at the scene's hour, the rain forced)
+    if (g_qbPhase == 0) {   // a scene: its light, exposure, shadows and clouds settle
+        sprintf(g_lampMsg, "benchmark: %s, settling ... hands off (B stops)", kQbScn[sc]);
+        if (t >= 4.0 && g_qbFrames >= 20) { g_qbPhase = 1; g_qbWin = 0; g_qbPhaseT = QbNow(); g_qbFrames = 0; QbSet(g_qbPlan[sc][0], false); }
+        return;
+    }
+    int w = g_qbPlan[sc][g_qbWin];
+    if (g_qbPhase == 1) {   // a window settling (a reference after a section back on: longer)
+        double need = w >= 100 ? 1.5 : w == -1 && g_qbWin > 0 ? 1.0 : 0.6;
+        if (t >= need && g_qbFrames >= 8) { g_qbPhase = 2; g_qbPhaseT = QbNow(); g_qbFrames = 0; g_qbSN = g_qbSGN = 0; }
+        return;
+    }
+    // measuring
+    int done = 0, all = 0;
+    for (int k = 0; k < g_qbScenesN; ++k) all += g_qbPlanN[g_qbScenes[k]];
+    for (int k = 0; k < g_qbSc; ++k) done += g_qbPlanN[g_qbScenes[k]];
+    done += g_qbWin;
+    sprintf(g_lampMsg, "benchmark: %s, %s (%d of %d) ... hands off (B stops)", kQbScn[sc], QbWinName(w), done + 1, all);
+    if ((t < 1.4 || g_qbFrames < 12) && g_qbSN < 600) return;
+    g_qbMs[sc][g_qbWin] = Median(g_qbS, g_qbSN);
+    g_qbWait[sc][g_qbWin] = Median(g_qbSW, g_qbSN);
+    g_qbGpu[sc][g_qbWin] = Median(g_qbSG, g_qbSGN);
+    g_qbMod[sc][g_qbWin] = Median(g_qbSM, g_qbSGN);
+    Log("quick bench: %-6s %-56s %6.2f ms (GPU %.2f, mod passes %.2f, wait %.2f; %d frames)", kQbScn[sc], QbWinName(w), g_qbMs[sc][g_qbWin],
+        g_qbGpu[sc][g_qbWin], g_qbMod[sc][g_qbWin], g_qbWait[sc][g_qbWin], g_qbSN);
+    QbSet(w, true);
+    if (++g_qbWin < g_qbPlanN[sc]) {
+        QbSet(g_qbPlan[sc][g_qbWin], false);
+        g_qbPhase = 1; g_qbPhaseT = QbNow(); g_qbFrames = 0;
+        return;
+    }
+    if (++g_qbSc < g_qbScenesN) {   // the next scene
+        QbScene(g_qbScenes[g_qbSc]);
+        g_qbPhase = 0; g_qbPhaseT = QbNow(); g_qbFrames = 0;
+        return;
+    }
+    QbRestore();
+    g_qbPhase = -1;
+    QbReport();
+    sprintf(g_lampMsg, "benchmark done: the costs are next to the sections (scripts\\NewLook_bench_report.txt)");
+    g_textDirty = true;
 }

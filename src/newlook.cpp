@@ -1,4 +1,4 @@
-// NewLook 1.71 - better sun shadows, AO, bounce light and air for Need for Speed: Most Wanted (2012).
+// NewLook 1.88 - better sun shadows, AO, bounce light and air for Need for Speed: Most Wanted (2012).
 //
 // An ASI plugin (loaded by the ASI loader of HD Effects, dinput8.dll), separate from DroneCam.
 // It hooks D3D11 through the vtables of a throw-away device: CreatePixelShader recognises the
@@ -254,6 +254,71 @@ static Param g_p[] = {
     { "PaintClearCoat", "Car paint: clear coat (a sharp highlight over the colour)", 0.6f, 0.0f, 1.0f, 0.05f, 0 },
     { "PaintSoft", "Car paint: the colour's own highlight soft (0 as the game .. 1 satin)", 0.4f, 0.0f, 1.0f, 0.05f, 0 },
     { "PaintFlakes", "Car paint: metallic flakes (sparkle in the sun; the player's car)", 0.4f, 0.0f, 1.0f, 0.05f, 0 },
+    { "CarRainDrops", "Rain on the player's car: on, how thick the drops sit (0 off)", 0.7f, 0.0f, 1.0f, 0.05f, 0 },
+    // 1.81: the drops' behaviour (carrain.inc)
+    { "CarRainLanding", "Rain on the car: how much lands (x: drops a second and how thick they may sit)", 1.0f, 0.2f, 3.0f, 0.1f, 0 },
+    { "CarRainSlide", "Rain on the car: how readily drops run (x: the paint holds them less)", 1.0f, 0.3f, 3.0f, 0.1f, 0 },
+    { "CarRainSpeed", "Rain on the car: how fast a running drop goes (x)", 1.0f, 0.3f, 3.0f, 0.1f, 0 },
+    { "CarRainTrail", "Rain on the car: a run's wet track lasts (seconds)", 3.0f, 0.5f, 20.0f, 0.5f, 0 },
+    { "CarRainSize", "Rain on the car: drop size (x)", 1.0f, 0.5f, 2.0f, 0.05f, 0 },
+    { "CarRainWind", "Rain on the car: the air pushes drops back when driving (x)", 1.0f, 0.0f, 3.0f, 0.1f, 0 },
+    { "CarRainDry", "Rain on the car: how fast drops dry after the rain (x)", 1.0f, 0.0f, 20.0f, 0.5f, 0 },
+    // 1.82: the weather (weather.inc)
+    { "Weather", "Weather: on (drives the sky, the wet ground, the puddles, the haze, the car's rain)", 0.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "WeatherRain", "Weather: rain now, by hand (0 none .. 1 heavy)", 0.6f, 0.0f, 1.0f, 0.05f, 0 },
+    { "WeatherClouds", "Weather: clouds, by hand (0 clear .. 1 storm; rain closes them in)", 0.3f, 0.0f, 1.0f, 0.05f, 0 },
+    { "WeatherAuto", "Weather: changes by itself (clear .. heavy rain and back)", 0.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "WeatherPhase", "Weather: minutes a phase (by itself)", 5.0f, 0.5f, 60.0f, 0.5f, 0 },
+    { "WeatherSoak", "Weather: minutes of rain to soak the ground", 1.5f, 0.1f, 20.0f, 0.1f, 0 },
+    { "WeatherDry", "Weather: minutes to dry after the rain", 8.0f, 0.5f, 120.0f, 0.5f, 0 },
+    { "WeatherPuddles", "Weather: minutes of rain to fill the puddles", 4.0f, 0.5f, 60.0f, 0.5f, 0 },
+    { "WeatherFog", "Weather: fog (thicker haze)", 0.0f, 0.0f, 1.0f, 0.05f, 0 },
+    // 1.83: rain falling, the wind (rainfall.inc, weather.inc)
+    { "Rain", "Rain falling: streaks (x; how hard: the weather's rain)", 1.0f, 0.0f, 3.0f, 0.1f, 0 },
+    { "RainLength", "Rain falling: streaks' length (x: the eye's blur)", 1.0f, 0.2f, 3.0f, 0.1f, 0 },
+    { "RainDropSize", "Rain falling: drops' size (x)", 1.0f, 0.5f, 3.0f, 0.1f, 0 },
+    { "RainSplashes", "Rain falling: splashes on the ground (x)", 1.0f, 0.0f, 3.0f, 0.1f, 0 },
+    { "RainRipples", "Rain falling: rings on puddles (x)", 1.0f, 0.0f, 3.0f, 0.1f, 0 },
+    { "Wind", "Wind: strength, m/s (the rain slants, the car's drops blown)", 3.0f, 0.0f, 25.0f, 0.5f, 0 },
+    { "WindDir", "Wind: blows towards, degrees (0 = +z)", 45.0f, 0.0f, 360.0f, 5.0f, 0 },
+    { "WindGusts", "Wind: gusts (0 steady .. 1 gusty)", 0.4f, 0.0f, 1.0f, 0.05f, 0 },
+    { "WindStorm", "Wind: + m/s in heavy rain (the weather)", 6.0f, 0.0f, 20.0f, 0.5f, 0 },
+    // 1.84
+    { "RainSpeed", "Rain falling: how fast the drops fall (x)", 1.0f, 0.3f, 2.0f, 0.05f, 0 },
+    { "UnderCarDark", "Reflections: no sky under the player's car (its dark patch in puddles)", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "LensDrops", "Rain on the camera's lens (drops that slide, merge, blow off)", 1.0f, 0.0f, 3.0f, 0.1f, 0 },
+    { "LensDropSize", "Rain on the camera's lens: drop size (x)", 1.0f, 0.3f, 3.0f, 0.1f, 0 },
+    { "LensDropsOn", "Rain on the camera's lens: on / off", 1.0f, 0.0f, 1.0f, 1.0f, 0 },   // 1.86
+    { "WindLeaves", "Wind: trees' leaves sway (x; 0 off)", 1.0f, 0.0f, 3.0f, 0.1f, 0 },   // 1.87 (wind.inc)
+    { "WindFlutter", "Wind: leaves flutter (x; 0 off)", 1.0f, 0.0f, 3.0f, 0.1f, 0 },
+    { "RainBright", "Rain falling: how well the streaks are seen (x)", 1.0f, 0.2f, 3.0f, 0.1f, 0 },          // 1.88
+    { "CarDropsVisible", "Rain on the car: how well the drops are seen (x)", 1.6f, 0.5f, 4.0f, 0.1f, 0 },
+    { "RainHeadlights", "Rain falling: lit in the player's headlights (x)", 1.0f, 0.0f, 3.0f, 0.1f, 0 },
+    { "SkyOvercastSun", "Sky: the sun through a thick cloud deck (overcast, storm; 1 as before)", 0.3f, 0.0f, 1.0f, 0.05f, 0 },   // 1.89
+    { "WeatherKind", "Weather: now / go to (by itself: it walks on from it)", 0.0f, 0.0f, 12.0f, 1.0f, 0 },
+    { "WeatherChange", "Weather: a change takes, minutes (the clouds; the rain in half)", 2.0f, 0.2f, 20.0f, 0.2f, 0 },
+    { "GameReflOurSky", "Reflections: the game's own (windows, walls) in our sky's colour (0: its time of day)", 1.0f, 0.0f, 1.0f, 0.05f, 0 },   // 1.94
+    // 1.96: the quality preset, the menu's view, the sections' switches (sections.inc)
+    { "Quality", "Quality (what the costly settings are)", 3.0f, 0.0f, 4.0f, 1.0f, 0 },
+    { "MenuAdvanced", "Menu", 0.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecSunMoon", "Section: sun & moon", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecSky", "Section: sky & clouds", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecWeather", "Section: weather", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecShadows", "Section: shadows", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecAO", "Section: ambient occlusion & bounce light", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecAir", "Section: air", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecReflections", "Section: reflections", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecWet", "Section: wet roads & puddles", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecMaterials", "Section: materials", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecLamps", "Section: street lamps", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecCarLights", "Section: car lights", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecRain", "Section: rain effects", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecWind", "Section: wind", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SecLook", "Section: colour", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    // 1.96f: the clouds' march made cheaper (sky.inc): longer steps far off, fewer light samples, out when opaque
+    { "SkyFast", "Sky: faster clouds (1: longer steps inside far clouds, fewer light samples; 2: also through the gaps; 0: as before)", 1.0f, 0.0f, 2.0f, 1.0f, 0 },
+    // 1.96g: the 1-pixel white rims on things' edges (reflections): the edge-on pixels' grazing Fresnel off (NewLook.hlsl PS_SSRApply)
+    { "SsrEdges", "Reflections: no white 1-pixel rims on edges (an edge-on pixel reflects as face on)", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
 };
 enum { P_BOUNCE = 21, P_BOUNCE_R = 22, P_FAST = 23, P_BOUNCE_ALL = 24, P_BOUNCE_HIST = 25, P_LAMP = 26, P_LAMP_THR = 27,
        P_LAMP_REACH = 28, P_LAMP_SRC = 29, P_LAMP_DAY = 30, P_LAMP_AUTO = 31, P_LAMP_POWER = 32, P_KNOCK = 33, P_AUTO_LAMPS = 34, P_LAMP_RADIUS = 35, P_LAMP_SHADOW = 36, P_LAMP_SHADOW_T = 37, P_NIGHT_AMB = 38, P_LAMP_SHADOW_MAPS = 39, P_LAMP_SIZE = 40, P_LAMP_SHADOW_BUDGET = 41, P_LAMP_SHADOW_CUT = 42, P_SOFT_SUN = 43, P_LAMP_RES = 44, P_LOOK = 45, P_LOOK_PRESET = 61, P_SKY_OCC = 62, P_SSR = 64, P_GLOW = 68, P_HL_BEAM = 71, P_HL_GAME = 72, P_HL_SOFT = 73, P_HL_LEN = 74, P_TRAFFIC = 75, P_TR_HEAD = 77, P_TR_TAIL = 81, P_TR_FIX = 85, P_SKY = 91, P_LOOK_X = 106, P_SS = 113, P_PBR = 121, P_REL = 125, P_POM = 129, P_SS_HALF = 133, P_SS_SKIP = 134, P_SUN_PATH = 135, P_SUN_FADE = 136, P_MOON_SHADOWS = 137,
@@ -265,6 +330,7 @@ enum { P_BOUNCE = 21, P_BOUNCE_R = 22, P_FAST = 23, P_BOUNCE_ALL = 24, P_BOUNCE_
        P_PUDDLE_BIG = 177, P_SSR_EARLY = 180 };   // 1.47: 177 big matte puddles, 178 their size, 179 their gloss; 180 the reflections' source before the effects; 1.48: 181 their water; 1.49: 182..184 the small ones' size, gloss, water
 static void LookApplyPreset(int k);
 static const int kParams = sizeof(g_p) / sizeof(g_p[0]);
+#include "sections.inc"   // 1.96: the sections' switches, the quality presets
 static const char* kViews[] = { "normal", "split: left = original", "contact shadow mask", "AO mask",
                                 "new shadow", "original shadow", "check: red = estimate error",
                                 "game sun light x4", "coverage (magenta = processed)", "", "", "", "", "", "", "",
@@ -278,8 +344,9 @@ static const char* kViews[] = { "normal", "split: left = original", "contact sha
                                 "reflections: what the ray found", "wetness (white) and puddles (blue)", "reflections: the normal used",
                                 "sun shadow: this frame alone (before smoothing)",
                                 "modern lighting: the sky reflected (x4)", "modern lighting: roughness (white = rough)",
-                                "relief: grey = cavities, red = small sun shadows" };
-static const int kViewCount = 37;
+                                "relief: grey = cavities, red = small sun shadows",
+                                "car rain: red drops held, green running, blue fine beads, yellow wet trails" };
+static const int kViewCount = 38;
 // views that show the game's own image need the copy of the frame
 static bool ViewNeedsCopy(int v) { return v == 6 || v == 8 || v == 9 || v == 13; }
 static volatile LONG g_wantDump;  // log the next main sun pass in detail
@@ -303,6 +370,7 @@ static void LoadIni()
     g_halfRes = GetPrivateProfileIntA("NewLook", "HalfResEffects", 1, g_iniPath) != 0;
     g_view = GetPrivateProfileIntA("NewLook", "View", 0, g_iniPath);
     if (g_view < 0 || g_view >= kViewCount) g_view = 0;
+    SecReset();   // (1.96: the ini's values are the player's own)
     for (int i = 0; i < kParams; ++i) {
         char def[32];
         sprintf(def, "%g", g_p[i].def);
@@ -310,6 +378,8 @@ static void LoadIni()
         float v = (float)atof(b);
         g_p[i].v = v < g_p[i].mn ? g_p[i].mn : v > g_p[i].mx ? g_p[i].mx : v;
     }
+    SecEnforce();   // 1.96: switched-off sections
+    QualLoad();
 }
 
 // "custom" in a preset choice (Look preset, sky weather) keeps what you set: going to a preset saves your values,
@@ -355,7 +425,7 @@ static void SaveIni()
     // 1.65: the section written once: ~200 single writes each read and rewrote the whole file (a stall on H). Our keys
     // replaced or added; any other line of the section kept.
     struct KV { const char* k; char v[512]; };
-    static KV kv[kParams + 8];
+    static KV kv[kParams + 9];
     int nk = 0;
     auto put = [&](const char* k, const char* v) { kv[nk].k = k; strncpy(kv[nk].v, v, 511); kv[nk].v[511] = 0; ++nk; };
     char b[64];
@@ -363,7 +433,8 @@ static void SaveIni()
     put("ShowOverlay", g_overlay ? "1" : "0");
     sprintf(b, "%d", g_view);
     put("View", b);
-    for (int i = 0; i < kParams; ++i) { sprintf(b, "%.3f", g_p[i].v); put(g_p[i].key, b); }
+    for (int i = 0; i < kParams; ++i) { sprintf(b, "%.3f", UserValue(i)); put(g_p[i].key, b); }   // (1.96: a switched-off section's own values)
+    { static char ql[512]; QualSaveLine(ql); if (ql[0]) put("QualityCustom", ql); }
     for (int s = 0; s < 2; ++s) {
         PresetMemory& m = g_presetMem[s];
         if (g_p[m.preset].v < 0.5f) PresetMemSave(m);   // custom now: these are its values
@@ -377,7 +448,7 @@ static void SaveIni()
         put("NewLamp", b);
     }
     static char cur[65536], out[65536];
-    bool used[kParams + 8] = {};
+    bool used[kParams + 9] = {};
     DWORD got = GetPrivateProfileSectionA("NewLook", cur, sizeof(cur) - 2, g_iniPath);
     cur[got] = cur[got + 1] = 0;
     char* o = out;
@@ -654,6 +725,7 @@ static void SkyNoteGame(const void* code, SIZE_T size, ID3D11PixelShader* ps, co
 static ID3D11PixelShader* SkySubstitute(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps);
 static void SkyBindForSun(ID3D11DeviceContext* ctx);
 static void RainBind(ID3D11DeviceContext* ctx);   // rain.inc
+static void RainFrame(ID3D11DeviceContext* ctx);  // (rain.inc) 1.84: the player's car this frame, the rain constants
 static void SkyAfterDraw(ID3D11DeviceContext* ctx);
 static void SkyApplyWeather(int k);
 struct DrawCall;
@@ -794,6 +866,11 @@ static ID3D11PixelShader* g_psCam;        // 4x2 record of the view ray (reproje
 static ID3D11PixelShader* g_psEmit;       // lamp finder (one pixel per 32x32 tile)
 static ID3D11PixelShader* g_psEditor;     // lamp editor overlay (view 24)
 static ID3D11PixelShader* g_psAir;        // haze / glow / shafts after the transparents
+static ID3D11PixelShader* g_psCarGlass;   // 1.81: the rain drops on the player's car's glass (carrain.inc)
+static ID3D11VertexShader *g_vsRain, *g_vsSplash;   // 1.83: rain falling (rainfall.inc)
+static ID3D11PixelShader *g_psRain, *g_psSplash;
+static ID3D11VertexShader* g_vsLens;   // 1.84: rain on the lens (rainfall.inc)
+static ID3D11PixelShader* g_psLens;
 static ID3D11VertexShader* g_vsText;
 static ID3D11PixelShader* g_psText;
 static ID3D11Buffer* g_cb;
@@ -1034,68 +1111,6 @@ static CarLight g_carLight[64];
 static int g_carLightN;
 static int MapNearest(const float* p, float maxD);
 
-static void LampsUpdate(const float* pos, UINT posPitch, const float* col, UINT colPitch)
-{
-    DWORD now = GetTickCount();
-    // 1) this round's candidates, clustered (a lamp on a tile border shows up twice)
-    struct Cl { float p[3], c[3], w, ny; };
-    static Cl cl[1024];
-    int nc = 0;
-    for (UINT y = 0; y < g_tilesH; ++y)
-        for (UINT x = 0; x < g_tilesW; ++x) {
-            const float* pp = (const float*)((const char*)pos + y * posPitch) + x * 4;
-            const float* cc = (const float*)((const char*)col + y * colPitch) + x * 4;
-            float l = Lum3(cc);
-            if (pp[3] < 0.5f || !(l > 0) || !(l < 1e30f)) continue;
-            int k = 0;
-            for (; k < nc; ++k) {
-                float dx = cl[k].p[0] / cl[k].w - pp[0], dy = cl[k].p[1] / cl[k].w - pp[1], dz = cl[k].p[2] / cl[k].w - pp[2];
-                if (dx * dx + dy * dy + dz * dz < 1.5f * 1.5f) break;
-            }
-            if (k == nc) { if (nc == 1024) continue; memset(&cl[nc++], 0, sizeof(Cl)); }
-            for (int j = 0; j < 3; ++j) { cl[k].p[j] += pp[j] * l; cl[k].c[j] += cc[j]; }
-            cl[k].w += l;
-            cl[k].ny += (pp[3] - 2) * l;   // the bright pixels' normal y (the finder's w = 2 + it)
-        }
-    // 2) matched to the kept lamps
-    static bool matched[kMaxLamps];
-    memset(matched, 0, sizeof(matched));
-    for (int k = 0; k < nc; ++k) {
-        float cp[3] = { cl[k].p[0] / cl[k].w, cl[k].p[1] / cl[k].w, cl[k].p[2] / cl[k].w };
-        int best = -1;
-        float bd = 2.0f * 2.0f;
-        for (int i = 0; i < g_lampCount; ++i) {
-            float dx = g_lamps[i].p[0] - cp[0], dy = g_lamps[i].p[1] - cp[1], dz = g_lamps[i].p[2] - cp[2];
-            float d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 < bd) { bd = d2; best = i; }
-        }
-        if (best >= 0) {
-            Lamp& L = g_lamps[best];
-            for (int j = 0; j < 3; ++j) { L.p[j] += (cp[j] - L.p[j]) * 0.25f; L.c[j] += (cl[k].c[j] - L.c[j]) * 0.3f; }
-            L.seen = now; L.misses = 0; ++L.hits;
-            matched[best] = true;
-        } else {
-            int slot = g_lampCount < kMaxLamps ? g_lampCount++ : -1;
-            if (slot < 0) {   // full: replace the longest unseen
-                slot = 0;
-                for (int i = 1; i < g_lampCount; ++i) if ((LONG)(g_lamps[slot].seen - g_lamps[i].seen) > 0) slot = i;
-            }
-            Lamp& L = g_lamps[slot];
-            memcpy(L.p, cp, sizeof(cp)); memcpy(L.c, cl[k].c, sizeof(L.c));
-            L.seen = now; L.hits = 1; L.misses = 0;
-            matched[slot] = true;
-        }
-    }
-    // 3) not found again: gone (moved, switched off) if it should have been seen, else kept a while
-    for (int i = 0; i < g_lampCount; ++i) {
-        if (matched[i]) continue;
-        bool drop = now - g_lamps[i].seen > 8000;
-        if (!drop && g_camKnown && OnScreen(g_lamps[i].p) && ++g_lamps[i].misses >= 4) drop = true;
-        if (drop) { g_lamps[i] = g_lamps[--g_lampCount]; matched[i] = matched[g_lampCount]; --i; }
-    }
-}
-
-static bool MapLearn(const Lamp& L, bool merge);
 
 // Read back the oldest pending lamp-finder result if the GPU has finished it (never waits).
 static void LampsReadBack(ID3D11DeviceContext* ctx, unsigned frame)
@@ -1110,9 +1125,9 @@ static void LampsReadBack(ID3D11DeviceContext* ctx, unsigned frame)
             for (int r = 0; r < 4; ++r) memcpy(g_cam[r], (const float*)m[2].pData + r * 4, 16);
             memcpy(g_aim, (const float*)((const char*)m[2].pData + m[2].RowPitch), 16);
             g_camKnown = true;
-            LampsUpdate((const float*)m[0].pData, m[0].RowPitch, (const float*)m[1].pData, m[1].RowPitch);
-            if (g_p[P_LAMP_AUTO].v > 0.5f)   // steady for a long while: a fixed lamp, not a car
-                for (int i = 0; i < g_lampCount; ++i) if (g_lamps[i].hits >= 60 && g_lamps[i].misses == 0) MapLearn(g_lamps[i], false);
+            // (1.92: the lamps found on screen are no longer used or learnt into the map (asked by the user: Shift+L once
+            // put thousands of them in); the pass stays for the camera record and the aim point)
+            g_lampCount = 0;
             g_stageFrame[k] = 0;
         }
         for (int j = 0; j < got; ++j) ctx->Unmap(g_stage[k][j], 0);
@@ -1295,27 +1310,6 @@ static int MapNearestGrid(const float* p, float maxD)
     return best;
 }
 
-// a found lamp into the map (merged with a map lamp within 2 m)
-static bool MapLearn(const Lamp& L, bool merge)
-{
-    int k = MapNearest(L.p, 2.0f);
-    if (k >= 0) {
-        if (!merge) return false;
-        for (int j = 0; j < 3; ++j) { g_map[k].p[j] = (g_map[k].p[j] + L.p[j]) * 0.5f; g_map[k].c[j] = (g_map[k].c[j] + L.c[j]) * 0.5f; }
-        return false;
-    }
-    if (g_mapCount >= kMaxMap) return false;
-    MapLampClear(g_map[g_mapCount]);
-    memcpy(g_map[g_mapCount].p, L.p, 12);
-    memcpy(g_map[g_mapCount].c, L.c, 12);
-    g_map[g_mapCount].group = -1;
-    g_map[g_mapCount].hasObj = 0;
-    ++g_mapCount;
-    g_mapDirty = true;
-    return true;
-}
-
-// Shift+K: a lamp at the aim point (snapped to a found lamp within 3 m, if any)
 static void SelLoad();
 static int g_lampSel = -1, g_dragAxis;
 
@@ -1445,39 +1439,6 @@ static float g_obT[3];            // the picked object's world position (object 
 static float g_obM[16];           // its axes (rows) and position from its draw's constants
 static bool g_obHaveT;
 static void ObPickRequest();
-static void MapAddAtAim()
-{
-    UndoPush("add lamp");
-    if (!g_camKnown || (g_aim[3] < 0.5f && g_tgtAdd < 0)) { strcpy(g_lampMsg, "add: nothing in the cross"); return; }
-    int best = g_tgtAdd >= 0 && g_tgtAdd < g_lampCount ? g_tgtAdd : -1;
-    Lamp L;
-    memset(&L, 0, sizeof(L));
-    if (best >= 0) L = g_lamps[best];
-    else {
-        // 30 cm in front of the surface, warm white
-        float v[3] = { g_aim[0] - g_cam[3][0], g_aim[1] - g_cam[3][1], g_aim[2] - g_cam[3][2] };
-        float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) + 1e-6f;
-        float pw = g_p[P_LAMP_POWER].v;
-        for (int j = 0; j < 3; ++j) L.p[j] = g_aim[j] - v[j] / l * 0.3f;
-        L.c[0] = pw; L.c[1] = pw * 0.8f; L.c[2] = pw * 0.55f;
-    }
-    if (g_mapCount >= kMaxMap) { strcpy(g_lampMsg, "add: map is full"); return; }
-    MapLampClear(g_map[g_mapCount]);
-    g_map[g_mapCount].p[0] = L.p[0]; g_map[g_mapCount].p[1] = L.p[1]; g_map[g_mapCount].p[2] = L.p[2];
-    memcpy(g_map[g_mapCount].c, L.c, 12);
-    g_map[g_mapCount].group = -1;
-    g_map[g_mapCount].hasObj = 0;
-    if (g_newLamp.valid) {   // the settings of the last lamp set up by hand
-        memcpy(g_map[g_mapCount].c, g_newLamp.c, 12);
-        g_map[g_mapCount].group = g_newLamp.group < g_presetCount ? g_newLamp.group : -1;
-    }
-    ++g_mapCount;
-    MapSave();
-    sprintf(g_lampMsg, "added lamp %d (%s), selected", g_mapCount, g_newLamp.valid ? "settings of the last lamp" : best >= 0 ? "found colour" : "by hand");
-    g_lampSel = g_mapCount - 1;
-    SelLoad();
-    Log("lamp map: %s", g_lampMsg);
-}
 
 // Shift+J: the map lamp nearest to the aim point (within 4 m) goes away
 static void MapDeleteAtAim()
@@ -1493,16 +1454,6 @@ static void MapDeleteAtAim()
     Log("lamp map: %s", g_lampMsg);
 }
 
-// Shift+L: every steady found lamp into the map
-static void MapLearnAll()
-{
-    UndoPush("learn found lamps");
-    int added = 0;
-    for (int i = 0; i < g_lampCount; ++i) if (g_lamps[i].hits >= 6 && MapLearn(g_lamps[i], true)) ++added;
-    MapSave();
-    sprintf(g_lampMsg, "learnt %d new lamps, map has %d", added, g_mapCount);
-    Log("lamp map: %s", g_lampMsg);
-}
 
 static UINT g_rtW, g_rtH, g_bbW, g_bbH;
 // ---- lamp editor (view 24): click a map lamp to select it, drag one of its three arrows to move it
@@ -1688,10 +1639,6 @@ static void EditorUpdate(bool active)
             }
         }
     }
-    static bool mmbDown;
-    bool mmb = active && (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
-    if (mmb && !mmbDown) MapAddAtAim();   // middle button = Shift+K
-    mmbDown = mmb;
     if (lmb && !g_lmbDown && g_obConnect) {   // connect mode: the click picks the game object under the cross
         ObPickRequest();
     } else if (lmb && !g_lmbDown) {   // click: grab an arrow, else pick the map lamp under the cursor
@@ -1849,7 +1796,7 @@ static int LampsUpload(ID3D11DeviceContext* ctx)
     static int upMap[kLampsUp];    // its map index (-1: a found lamp, -2: a car's light)
     static float upX[kLampsUp][4], upD[kLampsUp][4], upLo[kLampsUp][3];   // upLo: a car light's place on its car (fix pass)   // radius / car flag, a spot's direction and cone
     static float upScore[kLampsUp];
-    int src = (int)(g_p[P_LAMP_SRC].v + 0.5f);
+    int src = 2;   // (1.92: the map only; LampSource no longer used)
     int cap = (int)(g_p[P_LAMP_MAX].v + 0.5f);   // (1.39: the most lamps a frame)
     cap = cap < 8 ? 8 : cap > kLampsUp ? kLampsUp : cap;
     LampGroupSync();
@@ -2041,12 +1988,27 @@ struct LightCB {
     float P25[4];           // 1.66: sky occlusion cosine-weighted, AO multi-bounce, AO bitmask (options to compare)
     float P26[4];           // 1.67: the reflected sky: brightness, source, the probe's colour match, the seen sky by the level
     float P27[4];           // 1.70: car paint: clear coat, soft base highlight, metallic flakes
+    float P28[4];           // 1.74: the car's simulated rain drops there (t73 .. t76); fine beads blown off: top, sides, front / back
+    float P29[4];           // 1.75: x = seconds (real time, wrapped at an hour: the beads' life cycles)
+    float P30[4], P31[4], P32[4], P33[4];   // 1.83: rain falling (rainfall.inc): streaks, wind / ripples, the camera's velocity, rain now
 };
+static bool g_crValid;                       // (carrain.inc) the drops' atlas made this frame
+static float g_wxRain = -1;                  // (weather.inc) 1.82: rain falling now (0..1; -1: the weather off)
+static float g_wind[3], g_camVel[3];         // (weather.inc) 1.83: the wind (m/s, world), the camera's velocity (m/s)
+static void RainfallDraw(ID3D11DeviceContext* ctx, int cur, ID3D11ShaderResourceView* depth);   // (rainfall.inc)
+static void LensDraw(ID3D11DeviceContext* ctx);   // (rainfall.inc) 1.84: rain on the lens
+static void LensTick(float dt);
+static bool HlOnNow();   // (rainfall.inc) 1.88b: the game's headlights captured lately
+static unsigned g_playerGpuFrame;            // (rain.inc) 1.78: the player's car's matrix copied on the GPU this frame (+1)
+static float g_crBlown[3];
+static void CarRainBind(ID3D11DeviceContext* ctx);
+static ID3D11ShaderResourceView* CarMapSrv();   // (carrain.inc) 1.80: the car's shape in use (0: none yet)
 
 static const char* CloudCommonSrc();
 // the game runs D3D11 at feature level 10.x: shader model 4.0
 struct ShEntry { const char* entry; const char* target; bool depth, blend; };
-static const ShEntry kShList[28] = {
+static const int kShN = 35;
+static const ShEntry kShList[kShN] = {
     { "PS_Sun", "ps_4_0", false, false }, { "PS_Sun", "ps_4_0", true, false },
     { "PS_Sun", "ps_4_0", false, true },  { "PS_Sun", "ps_4_0", true, true },
     { "PS_Half", "ps_4_0", false, false }, { "PS_GIBlur", "ps_4_0", false, false },
@@ -2060,15 +2022,19 @@ static const ShEntry kShList[28] = {
     { "PS_LampFix", "ps_4_0", false, false }, { "PS_WetGlossMul", "ps_4_0", false, false },
     { "PS_WetGlossAdd", "ps_4_0", false, false }, { "PS_SunMask", "ps_4_0", false, false },
     { "PS_SunTemporal", "ps_4_0", false, false }, { "PS_SunUp", "ps_4_0", false, false },
-    { "PS_SkyPano", "ps_4_0", false, false }, { "PS_CityShadow", "ps_4_0", false, false } };
-// 1.59: the 28 compiled on several threads (each its own entry; d3dcompiler_47 is thread-safe), through the cache
-struct ShJob { const char* src; long n; ID3DBlob* code[28]; ID3DBlob* err[28]; HRESULT hr[28]; volatile LONG next; };
+    { "PS_SkyPano", "ps_4_0", false, false }, { "PS_CityShadow", "ps_4_0", false, false },
+    { "PS_CarGlass", "ps_4_0", false, false },   // (1.81)
+    { "VS_Rain", "vs_4_0", false, false }, { "PS_Rain", "ps_4_0", false, false },   // (1.83)
+    { "VS_Splash", "vs_4_0", false, false }, { "PS_Splash", "ps_4_0", false, false },
+    { "VS_Lens", "vs_4_0", false, false }, { "PS_Lens", "ps_4_0", false, false } };   // (1.84)
+// 1.59: the 28 (1.81: 29; 1.83: 33; 1.84: 35) compiled on several threads (each its own entry; d3dcompiler_47 is thread-safe), through the cache
+struct ShJob { const char* src; long n; ID3DBlob* code[kShN]; ID3DBlob* err[kShN]; HRESULT hr[kShN]; volatile LONG next; };
 static DWORD WINAPI ShWorker(LPVOID p)
 {
     ShJob* j = (ShJob*)p;
     for (;;) {
         LONG k = InterlockedIncrement(&j->next) - 1;
-        if (k >= 28) return 0;
+        if (k >= kShN) return 0;
         D3D_SHADER_MACRO mac[3] = {};
         int nm = 0;
         if (kShList[k].depth) { mac[nm].Name = "WRITE_DEPTH"; mac[nm++].Definition = "1"; }
@@ -2109,7 +2075,7 @@ static bool ShCompileAll(ShJob* j)
 }
 static void ShRelease(ShJob* j)
 {
-    for (int k = 0; k < 28; ++k) { if (j->code[k]) j->code[k]->Release(); if (j->err[k]) j->err[k]->Release(); j->code[k] = j->err[k] = 0; }
+    for (int k = 0; k < kShN; ++k) { if (j->code[k]) j->code[k]->Release(); if (j->err[k]) j->err[k]->Release(); j->code[k] = j->err[k] = 0; }
 }
 // at the game's start (the compiler loaded with its first shaders): the cache filled in the background, at a low
 // priority, so the switch-on finds it ready
@@ -2122,7 +2088,7 @@ static DWORD WINAPI ShPrewarm(LPVOID)
     static ShJob j;
     if (ShCompileAll(&j)) {
         int bad = 0;
-        for (int k = 0; k < 28; ++k) bad += FAILED(j.hr[k]);
+        for (int k = 0; k < kShN; ++k) bad += FAILED(j.hr[k]);
         Log("shader cache: ready in the background in %lu ms (%ld compiled, %d failed)", GetTickCount() - t0, g_cacheMisses - m0, bad);
         ShRelease(&j);
     }
@@ -2145,9 +2111,9 @@ static bool CompileShaders(ID3D11Device* dev)
     LONG h0 = g_cacheHits, m0 = g_cacheMisses;
     static ShJob j;
     if (!ShCompileAll(&j)) { sprintf(g_compileError, "NewLook.hlsl not found"); Log("%s", g_compileError); return false; }
-    ID3D11DeviceChild* made[28] = {};
+    ID3D11DeviceChild* made[kShN] = {};
     bool ok = true;
-    for (int k = 0; k < 28 && ok; ++k) {
+    for (int k = 0; k < kShN && ok; ++k) {
         HRESULT hr = j.hr[k];
         if (FAILED(hr) || !j.code[k]) {
             _snprintf(g_compileError, sizeof(g_compileError) - 1, "%s", j.err[k] ? (const char*)j.err[k]->GetBufferPointer() : "compile failed");
@@ -2164,10 +2130,10 @@ static bool CompileShaders(ID3D11Device* dev)
     ShRelease(&j);
     Log("NewLook.hlsl: %lu ms (%ld from the cache, %ld compiled)", GetTickCount() - t0, g_cacheHits - h0, g_cacheMisses - m0);
     if (!ok) {
-        for (int k = 0; k < 28; ++k) if (made[k]) made[k]->Release();
+        for (int k = 0; k < kShN; ++k) if (made[k]) made[k]->Release();
         return false;
     }
-    ID3D11DeviceChild** dst[28] = { (ID3D11DeviceChild**)&g_psSun[0], (ID3D11DeviceChild**)&g_psSun[1], (ID3D11DeviceChild**)&g_psSun[2],
+    ID3D11DeviceChild** dst[kShN] = { (ID3D11DeviceChild**)&g_psSun[0], (ID3D11DeviceChild**)&g_psSun[1], (ID3D11DeviceChild**)&g_psSun[2],
                                    (ID3D11DeviceChild**)&g_psSun[3], (ID3D11DeviceChild**)&g_psHalf, (ID3D11DeviceChild**)&g_psGIBlur,
                                    (ID3D11DeviceChild**)&g_psAir, (ID3D11DeviceChild**)&g_vsText, (ID3D11DeviceChild**)&g_psText,
                                    (ID3D11DeviceChild**)&g_psSnap, (ID3D11DeviceChild**)&g_psCam,
@@ -2175,8 +2141,10 @@ static bool CompileShaders(ID3D11Device* dev)
                                    (ID3D11DeviceChild**)&g_psSSRApply, (ID3D11DeviceChild**)&g_psSSRBlur, (ID3D11DeviceChild**)&g_psLampFix,
                                    (ID3D11DeviceChild**)&g_psWetGloss, (ID3D11DeviceChild**)&g_psWetGlossAdd,
                                    (ID3D11DeviceChild**)&g_psSunMask, (ID3D11DeviceChild**)&g_psSunTemporal, (ID3D11DeviceChild**)&g_psSunUp,
-                                   (ID3D11DeviceChild**)&g_psPano, (ID3D11DeviceChild**)&g_psCity };
-    for (int k = 0; k < 28; ++k) { if (*dst[k]) (*dst[k])->Release(); *dst[k] = made[k]; }
+                                   (ID3D11DeviceChild**)&g_psPano, (ID3D11DeviceChild**)&g_psCity, (ID3D11DeviceChild**)&g_psCarGlass,
+                                   (ID3D11DeviceChild**)&g_vsRain, (ID3D11DeviceChild**)&g_psRain, (ID3D11DeviceChild**)&g_vsSplash, (ID3D11DeviceChild**)&g_psSplash,
+                                   (ID3D11DeviceChild**)&g_vsLens, (ID3D11DeviceChild**)&g_psLens };
+    for (int k = 0; k < kShN; ++k) { if (*dst[k]) (*dst[k])->Release(); *dst[k] = made[k]; }
     g_compileError[0] = 0;
     Log("NewLook.hlsl compiled");
     return true;
@@ -2349,8 +2317,9 @@ static void CbsOnUnmap(ID3D11Resource* r);
 static void CbsOnUpdate(ID3D11Resource* r, const D3D11_BOX* box, const void* data);
 struct VsInfo;
 static unsigned long long WeInstKey(ID3D11DeviceContext* ctx, VsInfo* e, const DrawCall& d, unsigned long long* mesh, float* T, bool* placed, float* scale);
-static int WeCbNow(ID3D11Buffer* b, const unsigned char** data, UINT* size);   // worldedit.inc
+static int WeCbNow(ID3D11Buffer* b, const unsigned char** data, UINT* size, unsigned* ver = 0);   // worldedit.inc (1.96: ver: the copy's fill number)
 static void CoronaNote(const void* code, SIZE_T size, void* sh);               // sunshadow.inc
+static void SkyReflNote(const void* code, SIZE_T size, void* sh);              // skyrefl.inc (1.94)
 static void FlareNote(const void* code, SIZE_T size, void* sh, bool vs);       // sunshadow.inc
 static void Replay(ID3D11DeviceContext* ctx, const DrawCall& d);
 static volatile LONG g_captureReq;
@@ -2533,8 +2502,11 @@ static void Capture(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& dc, Li
 // CPU frame time from QueryPerformanceCounter. Shown in the overlay, logged with the stats.
 
 // (snap runs inside air: the mod's total counts air only)
-enum { PR_GAMESUN, PR_COPY, PR_HALF, PR_BLUR, PR_LAMPS, PR_SUN, PR_SNAP, PR_SSR, PR_AIR, PR_LOOK, PR_OVERLAY, PR_SSMASK, PR_SHPASS, PR_PAD, PR_EARLY, PR_PROBE, PR_COUNT };
-static const char* kProfNames[PR_COUNT] = { "game sun", "copy", "half-res", "blur", "lamps", "sun", "snap", "reflections", "air (with snap, refl.)", "look", "overlay", "sun shadow mask", "shadow pass (game + ours)", "bench padding", "reflections' copy", "sky probe" };
+enum { PR_GAMESUN, PR_COPY, PR_HALF, PR_BLUR, PR_LAMPS, PR_SUN, PR_SNAP, PR_SSR, PR_AIR, PR_LOOK, PR_OVERLAY, PR_SSMASK, PR_SHPASS, PR_PAD, PR_EARLY, PR_PROBE,
+       PR_CLOUDS, PR_CSHADOW, PR_SKYDRAW, PR_COUNT };   // (1.96f: the sky's: the clouds' march and resolve, their shadow map, the sky draw)
+static const char* kProfNames[PR_COUNT] = { "game sun", "copy", "half-res", "blur", "lamps", "sun", "snap", "reflections", "air (with snap, refl.)", "look", "overlay", "sun shadow mask", "shadow pass (game + ours)", "bench padding", "reflections' copy", "sky probe",
+                                            "clouds", "cloud shadows", "sky" };
+static bool g_skyDrawTimed;   // 1.96f: the sky draw's end mark due (AfterDraw)
 struct ProfFrame { ID3D11Query* dis; ID3D11Query* t[PR_COUNT][2]; ID3D11Query* f[2]; bool used[PR_COUNT]; bool live; };
 static const int kProfLag = 5;
 static ProfFrame g_pf[kProfLag];
@@ -2637,10 +2609,14 @@ static int ProfText(char* p)
 {
     char* s = p;
     double fps = g_cpuFrameMs > 0 ? 1000.0 / g_cpuFrameMs : 0;
-    double mod = g_gpuMs[PR_COPY] + g_gpuMs[PR_HALF] + g_gpuMs[PR_BLUR] + g_gpuMs[PR_LAMPS] + g_gpuMs[PR_SUN] + g_gpuMs[PR_AIR] + g_gpuMs[PR_LOOK] + g_gpuMs[PR_EARLY] + g_gpuMs[PR_PROBE];
+    double mod = g_gpuMs[PR_COPY] + g_gpuMs[PR_HALF] + g_gpuMs[PR_BLUR] + g_gpuMs[PR_LAMPS] + g_gpuMs[PR_SUN] + g_gpuMs[PR_AIR] + g_gpuMs[PR_LOOK] + g_gpuMs[PR_EARLY] + g_gpuMs[PR_PROBE] +
+                 g_gpuMs[PR_CLOUDS] + g_gpuMs[PR_CSHADOW] + g_gpuMs[PR_SKYDRAW];
     p += sprintf(p, "FPS %.1f (%.2f ms)   GPU frame %.2f ms   mod GPU %.2f ms   mod CPU %.2f ms\n", fps, g_cpuFrameMs, g_gpuFrameMs, mod, g_cpuModMs);
     p += sprintf(p, "GPU ms:");
-    for (int k = 0; k < PR_COUNT; ++k) p += sprintf(p, " %s %.2f%s", kProfNames[k], g_gpuMs[k], k == PR_GAMESUN ? " |" : "");
+    for (int k = 0; k < PR_COUNT; ++k) {
+        if (k == PR_OVERLAY || k == PR_CLOUDS) p += sprintf(p, "\n       ");   // (1.96g: wrapped: the line ran past the menu)
+        p += sprintf(p, " %s %.2f%s", kProfNames[k], g_gpuMs[k], k == PR_GAMESUN ? " |" : "");
+    }
     p += sprintf(p, "\n");
     return (int)(p - s);
 }
@@ -2777,6 +2753,7 @@ static void AirPass(ID3D11DeviceContext* ctx)
     ID3D11ShaderResourceView* noSrv[42] = {};
     ctx->PSSetShaderResources(0, 42, noSrv);          // the scene may be bound as an input right now
     ctx->PSSetShaderResources(56, 1, &g_expoSrv);     // the game's exposure (the debug views)
+    SkyBindForSun(ctx);   // 1.91: our clouds over the camera dim the glow round the sun (sky.inc)
     LightCB cb = g_air.cb;
     cb.L2[3] = g_view;
     D3D11_MAPPED_SUBRESOURCE m;
@@ -3006,6 +2983,7 @@ static void AirPass(ID3D11DeviceContext* ctx)
         oPSSetShader(ctx, g_psAir, 0, 0);
         Replay(ctx, g_air.dc);
     }
+    if (drawAir) { RainfallDraw(ctx, cur, g_air.depth); LensDraw(ctx); }   // 1.83: rain falling; 1.84: on the lens (rainfall.inc)
     if (g_view == 24 && g_psEditor && g_cbLamp && g_camFrame[cur] == g_frame + 1) {
         ctx->PSSetConstantBuffers(6, 1, &g_cbLamp);
         ctx->PSSetShaderResources(28, 1, &g_camRec[cur].srv);   // this frame's camera
@@ -3170,15 +3148,29 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
         cb.P23[0] = g_p[P_NOISE + 2].v; cb.P23[1] = g_p[P_NOISE + 7].v;
         cb.P24[0] = g_p[P_NOISE + 8].v;   // 1.46: the history's clip; the sky probe drawn of late (sky.inc)
         cb.P25[0] = g_p[188].v; cb.P25[1] = g_p[189].v; cb.P25[2] = g_p[190].v;   // 1.66: the AO options
+        cb.P25[3] = g_p[257].v;   // 1.96g: SsrEdges
         cb.P26[0] = g_p[191].v; cb.P26[1] = g_p[192].v; cb.P26[2] = g_p[193].v; cb.P26[3] = g_p[194].v;   // 1.67: the reflected sky
         cb.P27[0] = g_p[197].v; cb.P27[1] = g_p[198].v; cb.P27[2] = g_p[199].v;   // 1.70: car paint
+        cb.P27[3] = g_p[200].v;   // 1.73: rain drops on the player's car
+        RainFrame(ctx);   // 1.84: the player's car found this frame before its constants are written (t77, P29.y)
+        cb.P28[0] = g_crValid ? 1.0f : 0.0f; cb.P28[1] = g_crBlown[0]; cb.P28[2] = g_crBlown[1]; cb.P28[3] = g_crBlown[2];   // 1.74
+        { LARGE_INTEGER tq; QueryPerformanceCounter(&tq); cb.P29[0] = g_qpf.QuadPart ? (float)fmod((double)tq.QuadPart / g_qpf.QuadPart, 3600.0) : 0.0f; }
+        cb.P29[1] = g_playerGpuFrame == g_frame + 1 ? 1.0f : 0.0f;   // 1.78: t77 holds the player's car's matrix of this frame
+        cb.P29[2] = CarMapSrv() ? 1.0f : 0.0f;                         // 1.80: t78 its shape (view 37 checks it)
+        {   // 1.83: rain falling (rainfall.inc; the weather's rain), the wind, the camera's velocity
+            float R = g_wxRain > 0 ? g_wxRain : 0.0f;
+            cb.P30[0] = R * g_p[217].v; cb.P30[1] = g_p[218].v; cb.P30[2] = g_p[219].v; cb.P30[3] = g_p[220].v;
+            cb.P31[0] = g_wind[0]; cb.P31[1] = HlOnNow() ? g_p[235].v : 0.0f; cb.P31[2] = g_wind[2]; cb.P31[3] = g_p[221].v;   // (1.88b: y: RainHeadlights, the game's lights on)
+            cb.P32[0] = g_camVel[0]; cb.P32[1] = g_camVel[1]; cb.P32[2] = g_camVel[2]; cb.P32[3] = g_p[226].v;   // (1.84: RainSpeed)
+            cb.P33[0] = g_p[233].v; cb.P33[1] = R; cb.P33[2] = g_p[227].v; cb.P33[3] = g_p[234].v;   // (1.88: RainBright, CarDropsVisible)                               // (1.84: UnderCarDark)
+        }
         cb.P24[1] = g_probeSrv && g_probeFrame && g_frame + 1 - g_probeFrame < 120 ? 1.0f : 0.0f;
         {   // 1.41: the sky panorama's fading this frame (~8 s half)
             static LARGE_INTEGER lastQ; LARGE_INTEGER q; QueryPerformanceCounter(&q);
             float dt = lastQ.QuadPart && g_qpf.QuadPart ? (float)(q.QuadPart - lastQ.QuadPart) / g_qpf.QuadPart : 0.016f;
             lastQ = q;
             dt = dt < 0 ? 0 : dt > 0.25f ? 0.25f : dt;
-            cb.P21[2] = expf(-dt * 0.01155f);   // (1.45: ~60 s half: the sky kept by its level, below)
+            cb.P21[2] = expf(-dt * 0.1155f);    // (1.45: ~60 s half; 1.94: ~6 s: the weather moves on, the probe fills in)
             cb.P23[2] = g_sunActive ? 0.02f + g_skyLum : 1.0f;   // 1.45: the sky's level now (the panorama kept divided by it)
         }
         cb.P9[3] = g_p[P_LAMP_SHADOW_MAPS].v > 0.5f && g_lsSrv ? g_p[P_LAMP_SIZE].v : 0.0f;
@@ -3186,6 +3178,7 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
         ID3D11SamplerState* smp[4] = { cmp, g_sPoint, g_sWrap, g_sText };
         ID3D11ShaderResourceView* none[6] = {};
         ctx->PSSetShaderResources(16, 9, in);
+        CarRainBind(ctx);   // 1.74: the car's rain drops for PS_Sun (t73 .. t76)
         ctx->PSSetShaderResources(25, 6, none);
         ctx->PSSetSamplers(10, 4, smp);
         ctx->PSSetConstantBuffers(5, 1, &g_cb);
@@ -3439,12 +3432,15 @@ static void MatNotePs(const void* code, SIZE_T size, ID3D11PixelShader* ps);  //
 static ID3D11PixelShader* MatSubstitute(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps);
 static void BldNotePs(const void* code, SIZE_T size, ID3D11PixelShader* ps);  // matheight.inc
 static ID3D11PixelShader* BldSubstitute(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps);
+#include "hitch.inc"   // 1.81d: where a long frame's time went
 static HRESULT STDMETHODCALLTYPE HkCreatePS(ID3D11Device* dev, const void* code, SIZE_T size, ID3D11ClassLinkage* cl, ID3D11PixelShader** out)
 {
-    HRESULT hr = oCreatePS(dev, code, size, cl, out);
+    HtScope ht(HT_SH, HT_SHDRV, true);
+    HRESULT hr;
+    HT_CALL(ht, hr = oCreatePS(dev, code, size, cl, out));
     static bool tried;
     if (!tried) { tried = true; if (!LoadCompiler()) Log("no shader compiler: NewLook stays off"); }
-    if (SUCCEEDED(hr) && out && *out && code && g_reflect) { ExamineShader(code, size, *out); NameShader(code, size, *out); TxNotePs(code, size, *out); CoronaNote(code, size, *out); }
+    if (SUCCEEDED(hr) && out && *out && code && g_reflect) { ExamineShader(code, size, *out); NameShader(code, size, *out); TxNotePs(code, size, *out); CoronaNote(code, size, *out); SkyReflNote(code, size, *out); }
     if (SUCCEEDED(hr) && out && *out && code) FlareNote(code, size, *out, false);   // the game's sun flare (sunshadow.inc)
     if (SUCCEEDED(hr) && out && *out && code) { MatNotePs(code, size, *out); BldNotePs(code, size, *out); }
     if (SUCCEEDED(hr) && out && *out && code && PsDiscards(code, size)) {
@@ -3456,6 +3452,7 @@ static HRESULT STDMETHODCALLTYPE HkCreatePS(ID3D11Device* dev, const void* code,
 
 static void STDMETHODCALLTYPE HkPSSetShader(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps, ID3D11ClassInstance* const* ci, UINT n)
 {
+    HtScope ht(HT_PSSET, -1, false);
     SunInfo* s = FindSun(ps);
     if (ps && g_enabled && g_airWorks && g_air.frame == g_frame && g_airDoneFrame != g_frame && Immediate(ctx)) {
         for (int k = 0; k < 16 && g_postPS[k]; ++k)
@@ -3473,9 +3470,15 @@ static void STDMETHODCALLTYPE HkPSSetShader(ID3D11DeviceContext* ctx, ID3D11Pixe
 
 // 1.65: asked ~15 times a game draw: the game's immediate context known by its pointer (HookDevice), others asked
 static ID3D11DeviceContext* g_immCtx;
+static ID3D11DeviceContext* volatile g_immCtx2;   // (1.96: another found to be immediate: a wrapper's)
+static ID3D11DeviceContext* volatile g_defCtxLast;   // the last deferred one asked about
 static bool Immediate(ID3D11DeviceContext* ctx)
 {
-    return ctx == g_immCtx || ctx->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;
+    if (ctx == g_immCtx || ctx == g_immCtx2) return true;
+    if (ctx == g_defCtxLast) return false;
+    bool imm = ctx->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;   // (the device's immediate one lives as long as it)
+    if (imm) g_immCtx2 = ctx; else g_defCtxLast = ctx;
+    return imm;
 }
 
 // 1.65: per game draw (immediate context), the questions several parts ask about it answered once: its vertex shader's
@@ -3595,9 +3598,15 @@ static bool MainTarget(ID3D11DeviceContext* ctx)
 #include "carlights.inc"
 #include "sky.inc"
 #include "rain.inc"
+#include "weather.inc"   // 1.82
+#include "rainfall.inc"  // 1.83
+#include "carrain.inc"
 #include "gamewet.inc"
+#include "gametime.inc"   // 1.96b: the game's time of day (1.96d: our clock is it; the quick bench sets it)
 #include "sunshadow.inc"
+#include "skyrefl.inc"   // 1.94: the game's own reflections in our sky's colour
 #include "texreplace.inc"
+#include "wind.inc"   // 1.87 (preparation)
 #include "matpom.inc"
 #include "matheight.inc"
 
@@ -3788,6 +3797,8 @@ static bool BeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
 {
     if (g_earlyArm == g_frame + 1 && g_earlyFrame != g_frame + 1 && Immediate(ctx)) EarlyCopyCheck(ctx, d);
     if (g_coronaN && Immediate(ctx)) CoronaBefore(ctx);   // the game's sun corona at our sun (sunshadow.inc)
+    if (g_srN && Immediate(ctx)) SkyReflBefore(ctx);      // 1.94: its materials' reflections in our sky's colour (skyrefl.inc)
+    if (g_enabled && Immediate(ctx)) WindBeforeDraw(ctx);   // 1.87: the wind in the leaves (wind.inc)
     if (g_flareN && Immediate(ctx)) FlareBefore(ctx);     // its flare too
     HlScaleBegin(ctx);
     if (Immediate(ctx)) ExpoGrab(ctx);                            // the game's exposure, for the debug views
@@ -3801,7 +3812,10 @@ static bool BeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
 
 static void AfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d, bool timed)
 {
+    if (g_skyDrawTimed && Immediate(ctx)) { g_skyDrawTimed = false; ProfMark(ctx, PR_SKYDRAW, 1); }   // (1.96f: the sky draw)
+    WindAfterDraw(ctx);   // 1.87: our GS off after a leaves' draw (wind.inc)
     if (g_coronaPsSlot >= 0 || g_coronaVsSlot >= 0) CoronaAfter(ctx);
+    if (g_srSlot >= 0) SkyReflAfter(ctx);
     if (g_flareOn) FlareAfter(ctx);
     if (Immediate(ctx)) GameWetAfter(ctx);
     HlScaleEnd(ctx);
@@ -3809,7 +3823,7 @@ static void AfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d, bool timed)
     if (g_frameTrace == 2 && Immediate(ctx)) TraceDraw(ctx, d);
     if (g_recon == 2 && Immediate(ctx)) ReconDraw(ctx, d);
     if (g_enabled && g_lampUse > 0 && Immediate(ctx)) LsAfterDraw(ctx, d);
-    if (g_enabled && Immediate(ctx)) { RainAfterDraw(ctx, d); RainPlayerAfterDraw(ctx); }   // the rain map, the player's car (rain.inc)
+    if (g_enabled && Immediate(ctx)) { RainAfterDraw(ctx, d); RainPlayerAfterDraw(ctx, d); }   // the rain map, the player's car (rain.inc)
     if (g_pickReq == 2 && Immediate(ctx)) TxPickAfterDraw(ctx, d);   // the texture picker (texreplace.inc)
     if (g_enabled && g_p[P_SS_SKIP].v > 0.5f && Immediate(ctx)) GameShadowReaders(ctx);
     if (g_enabled && Immediate(ctx) && IsFinalPS(g_lastPS)) GradePass(ctx);
@@ -3823,17 +3837,18 @@ static void AfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d, bool timed)
     SunInfo* s = *CurSlot(ctx);
     if (!s) return;
     InterlockedIncrement(Immediate(ctx) ? &g_sunDrawsImm : &g_sunDrawsDef);
-    if (g_enabled) { SunPass(ctx, s, d); if (Immediate(ctx)) g_earlyArm = g_frame + 1; }
+    if (g_enabled && SecSunPass()) { SunPass(ctx, s, d); if (Immediate(ctx)) g_earlyArm = g_frame + 1; }   // (1.96b: a section in it on)
 }
 
 static void STDMETHODCALLTYPE HkDraw(ID3D11DeviceContext* ctx, UINT count, UINT start)
 {
     DrawScope scope(ctx);   // (1.65: the draw's answers cached)
+    HtScope ht(HT_DRAWOURS, HT_DRAW, false);
     DrawCall d = { DK_DRAW, count, start, 0, 0, 0 };
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
     bool timed = BeforeDraw(ctx, d);
-    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) oDraw(ctx, count, start);
+    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) HT_CALL(ht, oDraw(ctx, count, start));
     AfterDraw(ctx, d, timed);
     if (g_cbsOn) { unsigned long long cf = g_weCopyFrom; WeEnd(ctx, d, we); g_weCopyFrom = cf; if (cf) WeCopiesDraw(ctx, d); }
 }
@@ -3841,12 +3856,13 @@ static void STDMETHODCALLTYPE HkDraw(ID3D11DeviceContext* ctx, UINT count, UINT 
 static void STDMETHODCALLTYPE HkDrawIndexed(ID3D11DeviceContext* ctx, UINT count, UINT start, INT base)
 {
     DrawScope scope(ctx);   // (1.65: the draw's answers cached)
+    HtScope ht(HT_DRAWOURS, HT_DRAW, false);
     DrawCall d = { DK_INDEXED, count, start, 0, 0, base };
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
     if (we == WE_SPLIT) { WeSplitDraw(ctx, d); return; }
     bool timed = BeforeDraw(ctx, d);
-    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) oDrawIndexed(ctx, count, start, base);
+    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) HT_CALL(ht, oDrawIndexed(ctx, count, start, base));
     AfterDraw(ctx, d, timed);
     if (g_cbsOn) { unsigned long long cf = g_weCopyFrom; WeEnd(ctx, d, we); g_weCopyFrom = cf; if (cf) WeCopiesDraw(ctx, d); }
 }
@@ -3854,11 +3870,12 @@ static void STDMETHODCALLTYPE HkDrawIndexed(ID3D11DeviceContext* ctx, UINT count
 static void STDMETHODCALLTYPE HkDrawInstanced(ID3D11DeviceContext* ctx, UINT count, UINT inst, UINT start, UINT startInst)
 {
     DrawScope scope(ctx);   // (1.65: the draw's answers cached)
+    HtScope ht(HT_DRAWOURS, HT_DRAW, false);
     DrawCall d = { DK_INSTANCED, count, inst, start, startInst, 0 };
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
     bool timed = BeforeDraw(ctx, d);
-    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) oDrawInstanced(ctx, count, inst, start, startInst);
+    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) HT_CALL(ht, oDrawInstanced(ctx, count, inst, start, startInst));
     AfterDraw(ctx, d, timed);
     if (g_cbsOn) { unsigned long long cf = g_weCopyFrom; WeEnd(ctx, d, we); g_weCopyFrom = cf; if (cf) WeCopiesDraw(ctx, d); }
 }
@@ -3866,11 +3883,12 @@ static void STDMETHODCALLTYPE HkDrawInstanced(ID3D11DeviceContext* ctx, UINT cou
 static void STDMETHODCALLTYPE HkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT count, UINT inst, UINT start, INT base, UINT startInst)
 {
     DrawScope scope(ctx);   // (1.65: the draw's answers cached)
+    HtScope ht(HT_DRAWOURS, HT_DRAW, false);
     DrawCall d = { DK_INDEXED_INSTANCED, count, inst, start, startInst, base };
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
     bool timed = BeforeDraw(ctx, d);
-    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) oDrawIndexedInstanced(ctx, count, inst, start, base, startInst);
+    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) HT_CALL(ht, oDrawIndexedInstanced(ctx, count, inst, start, base, startInst));
     AfterDraw(ctx, d, timed);
     if (g_cbsOn) { unsigned long long cf = g_weCopyFrom; WeEnd(ctx, d, we); g_weCopyFrom = cf; if (cf) WeCopiesDraw(ctx, d); }
 }
@@ -3881,6 +3899,13 @@ typedef void(STDMETHODCALLTYPE* ExecListFn)(ID3D11DeviceContext*, ID3D11CommandL
 static DrawAutoFn oDrawAuto;
 static DrawIndirectFn oDrawIdxIndirect, oDrawInstIndirect;
 static ExecListFn oExecList;
+// 1.82b (hitch.inc): the game's asks for its queries' results and its flushes, timed
+typedef HRESULT(STDMETHODCALLTYPE* GetDataFn)(ID3D11DeviceContext*, ID3D11Asynchronous*, void*, UINT, UINT);
+typedef void(STDMETHODCALLTYPE* FlushFn)(ID3D11DeviceContext*);
+static GetDataFn oGetData;
+static FlushFn oFlush;
+static HRESULT STDMETHODCALLTYPE HkGetData(ID3D11DeviceContext* ctx, ID3D11Asynchronous* a, void* d, UINT n, UINT f) { HtScope ht(HT_QUERY, -1, false); return oGetData(ctx, a, d, n, f); }
+static void STDMETHODCALLTYPE HkFlush(ID3D11DeviceContext* ctx) { HtScope ht(HT_FLUSH, -1, false); oFlush(ctx); }
 static void STDMETHODCALLTYPE HkDrawAuto(ID3D11DeviceContext* ctx) { InterlockedIncrement(&g_drawCnt[4]); if (g_tracing) Trace("DrawAuto", ctx, 0); oDrawAuto(ctx); }
 static void STDMETHODCALLTYPE HkDrawIdxIndirect(ID3D11DeviceContext* ctx, ID3D11Buffer* b, UINT o) { InterlockedIncrement(&g_drawCnt[5]); if (g_tracing) Trace("DrawIndexedInstancedIndirect", ctx, b); oDrawIdxIndirect(ctx, b, o); }
 static void STDMETHODCALLTYPE HkDrawInstIndirect(ID3D11DeviceContext* ctx, ID3D11Buffer* b, UINT o) { InterlockedIncrement(&g_drawCnt[6]); if (g_tracing) Trace("DrawInstancedIndirect", ctx, b); oDrawInstIndirect(ctx, b, o); }
@@ -4086,12 +4111,18 @@ static void Keys()
     bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     bool changed = false;
     if (!(GetAsyncKeyState(VK_CONTROL) & 0x8000) && Pressed('Y', false)) { g_enabled = !g_enabled; changed = true; Log("NewLook %s", g_enabled ? "on" : "off"); }
-    if (shift && g_view != 24 && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && Pressed('B', false)) { BptAdd(); changed = true; }   // a bench viewpoint (bench.inc)
-    if (!shift && Pressed('B', false)) {   // bench: B the selected setting, Ctrl+B every effect (at every viewpoint), B again stops
-        if (g_benchPhase >= 0) BenchStop();
-        else if (GetAsyncKeyState(VK_CONTROL) & 0x8000) BenchStart(true, 0);
-        else if (!g_viewPicker && g_view != 24) BenchStart(false, g_order[g_sel % g_orderCount]);
-        changed = true;
+    // bench (bench.inc): Ctrl+B the quick one (sections, day / night / rain); Shift+B the selected setting; B (with or
+    // without them) stops a run. (1.96b: B alone left to the game; the old run over every effect taken off the keys)
+    {
+        bool ctl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0, running = g_benchPhase >= 0 || g_qbPhase >= 0;
+        if ((running || ctl != shift) && !(shift && g_view == 24) && Pressed('B', false)) {
+            if (g_benchPhase >= 0) BenchStop();
+            else if (g_qbPhase >= 0) QbStop("stopped");
+            else if (g_viewPicker || g_view == 24) {}
+            else if (ctl) QbStart();
+            else BenchStart(false, SelIdx());
+            changed = true;
+        }
     }
     if (Pressed('X', false) && shift && !g_pickReq) { g_pickReq = 1; strcpy(g_lampMsg, "texture pick: the material at the screen centre..."); changed = true; }
     if (Pressed('T', false) && shift) { g_recon = 1; strcpy(g_lampMsg, "shadow research: one frame logged (recon: lines)"); changed = true; }
@@ -4172,7 +4203,7 @@ static void Keys()
     if (Pressed('I', !shift)) {
         if (shift && g_view == 24) TplMake();   // the selected lamp's post becomes a template
         else if (shift && !lampEdit && g_orderCount) {   // 1.40: the group before (its first item)
-            int gI = g_orderGroup[g_sel % g_orderCount], to = (gI + kGroupCount - 1) % kGroupCount;
+            int gI = g_orderGroup[g_sel % g_orderCount], to = (gI + g_groupCount - 1) % g_groupCount;
             for (int k = 0; k < g_orderCount; ++k) if (g_orderGroup[k] == to) { g_sel = k; break; }
         }
         else if (!shift) { if (lampEdit) g_lampProp = (g_lampProp + 4) % 5; else g_sel = (g_sel + g_orderCount - 1) % g_orderCount; }
@@ -4183,7 +4214,7 @@ static void Keys()
             g_obConnect = !g_obConnect;
             strcpy(g_lampMsg, g_obConnect ? "CONNECT: put the cross on the object (lamp post) and click LMB" : "connect cancelled");
         } else if (shift && !lampEdit && g_orderCount) {   // 1.40: the group after
-            int gI = g_orderGroup[g_sel % g_orderCount], to = (gI + 1) % kGroupCount;
+            int gI = g_orderGroup[g_sel % g_orderCount], to = (gI + 1) % g_groupCount;
             for (int k = 0; k < g_orderCount; ++k) if (g_orderGroup[k] == to) { g_sel = k; break; }
         } else if (!shift) { if (lampEdit) g_lampProp = (g_lampProp + 1) % 5; else g_sel = (g_sel + 1) % g_orderCount; }
         changed = true;
@@ -4221,24 +4252,32 @@ static void Keys()
     }
     if (g_view == 24 && Pressed(VK_DELETE, false)) { MapDeleteAtAim(); changed = true; }
     if (shift) {   // lamp map
-        if (k) { MapAddAtAim(); changed = true; }
-        if (j) { MapDeleteAtAim(); changed = true; }
-        if (l) { MapLearnAll(); changed = true; }
+        if (j) { MapDeleteAtAim(); changed = true; }   // (1.92: Shift+K add, Shift+L learn the found ones: removed)
     } else {
+        int idx = SelIdx();
+        // 1.96: a setting of a switched-off section changed: the section on again first (its values back)
+        int gs = GroupOfParam(idx) - 1;
+        if ((k || l || j) && gs >= 0 && SecOf(idx) < 0 && g_p[P_SEC0 + gs].v < 0.5f) {
+            g_p[P_SEC0 + gs].v = 1;
+            SecEnforce();
+            sprintf(g_lampMsg, "%s: on again (a setting of it changed)", kSec[gs].name);
+        }
         float before = SelParam().v;
         if (k) { Param& p = SelParam(); p.v -= p.step; if (p.v < p.mn) p.v = p.mn; changed = true; }
         if (l) { Param& p = SelParam(); p.v += p.step; if (p.v > p.mx) p.v = p.mx; changed = true; }
         if (j) { SelParam().v = SelParam().def; changed = true; }
         if (k || l || j) {
-            int idx = (int)(&SelParam() - g_p);
             if (idx == P_LOOK_PRESET && g_p[idx].v > 0.5f) LookApplyPreset((int)(g_p[P_LOOK_PRESET].v + 0.5f));
             if (idx == P_SKY + 12 && g_p[idx].v > 0.5f) SkyApplyWeather((int)(g_p[P_SKY + 12].v + 0.5f));
             if (const char* pm = PresetMemChanged(idx, before)) strcpy(g_lampMsg, pm);
+            if (const char* qm = QualChanged(idx, before)) strcpy(g_lampMsg, qm);
+            if (SecOf(idx) >= 0) SecEnforce();
+            if (idx == P_MENU_ADV) MenuInit();
         }
     }
     if (Pressed('H', false)) { SaveIni(); MapSave(); ZoneSave(); strcpy(g_lampMsg, "saved: settings, lamp map, zones"); changed = true; }
     if (Pressed('P', false)) {
-        if (shift) { LoadIni(); PresetsLoad(); SelLoad(); if (g_dev) CompileShaders(g_dev); }
+        if (shift) { LoadIni(); PresetsLoad(); SelLoad(); MenuInit(); if (g_dev) CompileShaders(g_dev); }
         else g_overlay = !g_overlay;
         changed = true;
     }
@@ -4251,6 +4290,8 @@ static void Keys()
 static DWORD g_renderTid, g_nextText;
 static HRESULT STDMETHODCALLTYPE HkPresent(IDXGISwapChain* sc, UINT sync, UINT flags)
 {
+    HtFrameEnd(g_enabled);   // 1.81d: the frame that ended (logged if long); this one's Present counted from here
+    HtScope ht(HT_PRES, HT_PRESDRV, false);
     g_renderTid = GetCurrentThreadId();
     if (g_airWorks && g_enabled && g_air.frame == g_frame && g_airDoneFrame != g_frame) {
         if (++g_airMisses > 30) { g_airWorks = false; Log("air: no post-processing pass found, the air stays in the sun pass"); }
@@ -4301,6 +4342,18 @@ static HRESULT STDMETHODCALLTYPE HkPresent(IDXGISwapChain* sc, UINT sync, UINT f
         Log("timing: %s| lost %u | free address space %u of %u MB | render thread %lu | fast %d bounce %.2f | lamps %d found %d used",
             pt, g_profLost, (unsigned)(ms.ullAvailVirtual >> 20), (unsigned)(ms.ullTotalVirtual >> 20), g_renderTid,
             g_p[P_FAST].v > 0.5f, g_p[P_BOUNCE].v, g_lampCount, g_lampUse);
+        {   // 1.96: the CPU's frame in parts (hitch.inc); the GPU once
+            static char cl[640];
+            HtAvgText(cl, sizeof(cl));
+            if (cl[0]) Log("cpu: %s", cl);
+            static bool gpuLogged;
+            if (!gpuLogged && g_dev) {
+                gpuLogged = true;
+                char gd[256];
+                GpuDesc(gd, sizeof(gd));
+                Log("gpu: %s | quality %s, the game's picture %ux%u for a %ux%u screen", gd, kQualNames[(int)(g_p[P_QUALITY].v + 0.5f)], g_rtW, g_rtH, g_bbW, g_bbH);
+            }
+        }
     }
     if (g_overlay && (LONG)(now - g_nextText) >= 0) { g_nextText = now + 500; g_textDirty = true; }
     ID3D11DeviceContext* ctx = 0;
@@ -4315,11 +4368,16 @@ static HRESULT STDMETHODCALLTYPE HkPresent(IDXGISwapChain* sc, UINT sync, UINT f
         }
         if (g_obPhase != OB_IDLE) ObPresent(ctx);
         if (g_autoCopyN) AutoPresent(ctx);
+        WindFrame(ctx);     // 1.87: the wind in the leaves (wind.inc)
+        WeatherTick();      // 1.82: the weather's state, the settings it drives (weather.inc)
+        SecEnforce();       // 1.96: switched-off sections stay off (the weather drives some of their settings)
+        CarRainTick(ctx);   // 1.74: the rain drops on the player's car (carrain.inc)
         ProfFrameEnd(ctx);
     }
     LARGE_INTEGER pq0, pq1;
     QueryPerformanceCounter(&pq0);
-    HRESULT hr = oPresent(sc, g_benchUncap ? 0 : sync, flags);   // (vsync off while benching)
+    HRESULT hr;
+    HT_CALL(ht, hr = oPresent(sc, g_benchUncap ? 0 : sync, flags));   // (vsync off while benching)
     QueryPerformanceCounter(&pq1);
     if (g_qpf.QuadPart) g_benchWaitMs = (pq1.QuadPart - pq0.QuadPart) * 1000.0 / g_qpf.QuadPart;
     if (ctx) { ProfFrameBegin(ctx); ctx->Release(); }
@@ -4407,6 +4465,7 @@ static void HookDevice(ID3D11Device* dev, ID3D11DeviceContext* ctx)
 {
     if (!dev || !ctx || InterlockedExchange(&g_devHooked, 1)) return;
     g_immCtx = ctx;   // (the context D3D11CreateDevice gives is the immediate one)
+    TodInstall();     // 1.96b: the game's clock (gametime.inc)
     void** dv = *(void***)dev;
     void** cv = *(void***)ctx;
     Patch(dv, 15, (void*)HkCreatePS, (void**)&oCreatePS);
@@ -4447,6 +4506,8 @@ static void HookDevice(ID3D11Device* dev, ID3D11DeviceContext* ctx)
     Patch(cv, 39, (void*)HkDrawIdxIndirect, (void**)&oDrawIdxIndirect);
     Patch(cv, 40, (void*)HkDrawInstIndirect, (void**)&oDrawInstIndirect);
     Patch(cv, 58, (void*)HkExecList, (void**)&oExecList);
+    Patch(cv, 29, (void*)HkGetData, (void**)&oGetData);   // 1.82b (hitch.inc)
+    Patch(cv, 111, (void*)HkFlush, (void**)&oFlush);
     Log("context %p vtable %p, device %p vtable %p", ctx, cv, dev, dv);
     if (!g_dev) { g_dev = dev; g_dev->AddRef(); }
     Log("hooked the game's D3D11 device");
@@ -4723,7 +4784,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID)
         ZoneLoad();
         WeLoad();
         BptLoad();
-        Log("NewLook 1.71 loaded");
+        Log("NewLook 1.96h loaded");
         AddVectoredExceptionHandler(0, CrashLogger);
         InstallHooks();
     }

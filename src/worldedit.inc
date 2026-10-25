@@ -21,12 +21,13 @@ static void WeMsg(const char* fmt, ...)
 }
 
 // ---- copies of the game's constant buffers
+static volatile LONG g_cbsFill;   // (1.96) the fills' numbers
 struct CbShadow {
     ID3D11Buffer* b;              // held (its pointer cannot become another resource while we know it)
     UINT size;
     unsigned char* cpu;           // 0: not one we copy (not a constant buffer, too big, immutable)
     void* mapped;                 // the driver's memory between Map and Unmap
-    unsigned ver;                 // +1 at every fill
+    unsigned ver;                 // a new number at every fill (1.96: unique among all the buffers: g_cbsFill)
     bool valid, pending;
     unsigned keyVer; short keyOff; unsigned char lay; unsigned long long key;   // the key of the last matrix read from it
     unsigned added;               // the frame it was added
@@ -80,7 +81,7 @@ static CbShadow* CbsAdd(ID3D11Buffer* b)
 
 // 1.27: what a constant buffer holds now, for a shadow replay drawn later (sunshadow.inc): 1 = its copy (data, size);
 // 2 = its own contents do not change (immutable, or watched two frames and never written); 0 = not known (watched now)
-static int WeCbNow(ID3D11Buffer* b, const unsigned char** data, UINT* size)
+static int WeCbNow(ID3D11Buffer* b, const unsigned char** data, UINT* size, unsigned* ver)
 {
     if (!g_cbsCopy || !b) return 0;
     CbShadow* s = CbsFind(b);
@@ -91,7 +92,7 @@ static int WeCbNow(ID3D11Buffer* b, const unsigned char** data, UINT* size)
         return bd.Usage == D3D11_USAGE_IMMUTABLE ? 2 : 0;
     }
     if (s->pending) return 0;
-    if (s->valid) { *data = s->cpu; *size = s->size; return 1; }
+    if (s->valid) { *data = s->cpu; *size = s->size; if (ver) *ver = s->ver; return 1; }
     return s->ver == 0 && g_frame - s->added >= 2 ? 2 : 0;
 }
 
@@ -136,7 +137,7 @@ static void CbsOnUnmap(ID3D11Resource* r)
     memcpy(s->mapped, s->cpu, s->size);
     s->pending = false;
     s->valid = true;
-    ++s->ver;
+    s->ver = (unsigned)InterlockedIncrement(&g_cbsFill);
 }
 static void CbsOnUpdate(ID3D11Resource* r, const D3D11_BOX* box, const void* data)
 {
@@ -145,7 +146,7 @@ static void CbsOnUpdate(ID3D11Resource* r, const D3D11_BOX* box, const void* dat
     if (!s || !s->cpu) return;
     if (!box) { memcpy(s->cpu, data, s->size); s->valid = true; }
     else if (box->right <= s->size && box->left < box->right) memcpy(s->cpu + box->left, data, box->right - box->left);
-    ++s->ver;
+    s->ver = (unsigned)InterlockedIncrement(&g_cbsFill);
 }
 
 // ---- edits

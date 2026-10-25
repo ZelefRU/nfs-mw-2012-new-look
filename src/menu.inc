@@ -1,42 +1,100 @@
 // ---------------------------------------------------------------- menu (overlay text)
-// Lines of coloured pieces, drawn with GDI into the overlay texture. Parameters are shown in groups; only the group
-// of the selected one is open. U opens a list of the views. Load figures come last, in grey.
+// Lines of coloured pieces, drawn with GDI into the overlay texture. 1.96: two views (the first line, Menu): simple,
+// the sections (sections.inc) with their switch and their main settings under the selected one; advanced, every
+// setting by section (sub-headings in them), only the selected section open. U opens a list of the views. Load
+// figures come last, in grey.
 
-struct MenuGroup { const char* name; int items[40]; int n; };
-static const MenuGroup kGroups[] = {
-    { "SUN & MOON", { 135, 138, 139, 140, 141, 142, 136, 9, 148, 14, 143, 137, 144, 153, 154, 155, 146, 147, 145 }, 19 },
-    { "SHADOWS", { 113, 114, 3, 43, 11, 118, 4, 5, 119, 116, 115, 185, 186, 187, 133, 134, 117, 120, 12, 13, 0, 1, 2, 10 }, 23 },
-    { "AMBIENT & OCCLUSION", { 8, 38, 62, 63, 188, 15, 6, 7, 189, 190 }, 10 },
-    { "AIR", { 16, 149, 150, 151, 152, 17, 70, 20, 18, 19, 68, 69 }, 12 },
-    { "CAR LIGHTS", { 71, 74, 72, 73, 75, 77, 78, 79, 76, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90 }, 20 },
-    { "SKY", { 91, 103, 93, 100, 101, 102, 99, 94, 95, 96, 104, 105, 92, 97, 98 }, 15 },
-    { "MATERIALS (LIGHTING MODEL)", { 129, 130, 132, 131, 125, 128, 126, 127, 121, 122, 123, 124 }, 12 },
-    { "REFLECTIONS", { 64, 165, 166, 180, 109, 65, 175, 167, 112, 184, 182, 183, 177, 181, 178, 179, 110, 111, 66, 67, 191, 192, 193, 194 }, 24 },
-    { "NOISE / SPARKLE (find what makes it)", { 173, 168, 170, 176, 171, 169, 172, 174 }, 8 },
-    { "LOOK (COLOUR)", { 45, 61, 195, 196, 46, 47, 106, 48, 49, 50, 51, 107, 108, 52, 53, 54, 55, 56, 57, 58, 59, 60 }, 22 },
-    { "BOUNCE LIGHT", { 21, 22, 24, 25 }, 4 },
-    { "LAMPS", { 26, 164, 35, 44, 39, 40, 41, 42, 36, 37, 28, 29, 30, 33, 34, 27, 31, 32 }, 18 },
-    { "LAMP GROUPS (the map's lamps by kind)", { 156, 157, 160, 158, 159, 161, 162, 163 }, 8 },
-    { "SYSTEM", { 23 }, 1 },
-};
-static const int kGroupCount = sizeof(kGroups) / sizeof(kGroups[0]);
-static int g_order[256], g_orderGroup[256], g_orderCount;   // menu position -> parameter, its group
+// a group of the menu: group 0 the menu and quality, then the sections
+static int g_order[320], g_orderGroup[320], g_orderCount, g_groupCount;   // menu position -> parameter, its group
+static bool g_menuAdv;   // the view the order was made for
 
+static bool MenuAdv() { return g_p[P_MENU_ADV].v > 0.5f; }
+// the rows of group g in the current view (sub-headings < 0 too); n: how many
+static int GroupRows(int g, short* rows)
+{
+    int n = 0;
+    if (g == 0) {
+        rows[n++] = P_MENU_ADV; rows[n++] = P_QUALITY;
+        if (MenuAdv()) rows[n++] = P_FAST;
+        return n;
+    }
+    const SecDef& S = kSec[g - 1];
+    rows[n++] = (short)(P_SEC0 + g - 1);
+    if (MenuAdv()) for (int k = 0; k < S.na; ++k) rows[n++] = S.adv[k];
+    else for (int k = 0; k < S.ns; ++k) rows[n++] = S.simple[k];
+    return n;
+}
 static void MenuInit()
 {
+    int keep = g_orderCount ? g_order[g_sel % g_orderCount] : P_MENU_ADV;
+    g_menuAdv = MenuAdv();
     g_orderCount = 0;
-    for (int gI = 0; gI < kGroupCount; ++gI)
-        for (int k = 0; k < kGroups[gI].n && g_orderCount < 256; ++k) { g_order[g_orderCount] = kGroups[gI].items[k]; g_orderGroup[g_orderCount++] = gI; }
+    g_groupCount = 1 + kSecN;
+    for (int gI = 0; gI < g_groupCount; ++gI) {
+        short rows[80];
+        int n = GroupRows(gI, rows);
+        for (int k = 0; k < n && g_orderCount < 320; ++k)
+            if (rows[k] >= 0) { g_order[g_orderCount] = rows[k]; g_orderGroup[g_orderCount++] = gI; }
+    }
+    // the selection kept (in the simple view a setting it does not show: its section's switch)
+    int to = -1, sec = SecKilling(keep) >= 0 ? SecKilling(keep) : -1;
+    for (int k = 0; k < g_orderCount && to < 0; ++k) if (g_order[k] == keep) to = k;
+    if (to < 0)
+        for (int s = 0; s < kSecN && sec < 0; ++s)
+            for (int k = 0; k < kSec[s].na && sec < 0; ++k) if (kSec[s].adv[k] == keep) sec = s;
+    if (to < 0 && sec >= 0) for (int k = 0; k < g_orderCount && to < 0; ++k) if (g_order[k] == P_SEC0 + sec) to = k;
+    g_sel = to < 0 ? 0 : to;
 }
 static Param& SelParam() { return g_p[g_order[g_sel % g_orderCount]]; }
+static int SelIdx() { return g_order[g_sel % g_orderCount]; }
+// the group (0: menu, 1 + s: section s) a parameter is shown in, -1 none
+static int GroupOfParam(int p)
+{
+    if (p == P_MENU_ADV || p == P_QUALITY || p == P_FAST) return 0;
+    if (SecOf(p) >= 0) return 1 + SecOf(p);
+    for (int s = 0; s < kSecN; ++s) for (int k = 0; k < kSec[s].na; ++k) if (kSec[s].adv[k] == p) return 1 + s;
+    return -1;
+}
+
+// the simple view's own names (plain words); others: the setting's label
+static const char* SimpleLabel(int p)
+{
+    switch (p) {
+    case P_MENU_ADV: return "Menu";
+    case P_QUALITY: return "Quality";
+    case 138: return "Clock shift, h"; case 139: return "Sunrise at"; case 140: return "Sunset at";
+    case 103: return "Sky (a preset)"; case 93: return "Cloud cover"; case 104: return "Cloud quality (costs)";
+    case 237: return "Weather now"; case 211: return "Changes by itself"; case 238: return "A change takes, minutes";
+    case 115: return "Shadow quality (costs)"; case 116: return "Shadow reach, m (costs)"; case 114: return "Shadow softness (sun size)";
+    case 6: return "Ambient occlusion"; case 62: return "Sky occlusion (costs)"; case 21: return "Bounce light (costs)";
+    case 16: return "Haze"; case 19: return "Light shafts (costs)";
+    case 64: return "Reflections"; case 67: return "Reflection resolution, % (costs)";
+    case 65: return "Wet ground"; case 112: return "Small puddles (mirrors)"; case 177: return "Big puddles (matte)";
+    case 129: return "Parallax on roads (costs)"; case 125: return "Relief (costs)"; case 121: return "Lighting model";
+    case 26: return "Lamp brightness"; case 39: return "Lamp shadows on walls (costs)"; case 44: return "Lamp light at half resolution";
+    case 71: return "Headlight beams in the air"; case 75: return "Traffic cars' lights";
+    case 217: return "Falling rain"; case 230: return "Drops on the lens"; case 200: return "Drops on the car";
+    case 222: return "Wind, m/s"; case 231: return "Leaves sway (costs)";
+    case 61: return "Look (a preset)"; case 46: return "Exposure, EV"; case 47: return "Contrast";
+    }
+    return g_p[p].label;
+}
 
 // parameters that are a choice, not a number
 static const char* ChoiceText(int idx, float v)
 {
     int c = (int)(v + 0.5f);
+    if (SecOf(idx) >= 0) {   // 1.96: a section's switch
+        if (!c) return "OFF";
+        if (idx == P_SEC0 + S_TIME && g_p[P_SS].v < 0.5f) return "ON (needs SHADOWS > our shadow maps)";
+        return "ON";
+    }
     switch (idx) {
+    case P_QUALITY: return kQualNames[c < 0 ? 0 : c > 4 ? 4 : c];
+    case P_MENU_ADV: return c ? "ADVANCED (every setting)" : "SIMPLE (the main settings; K/L: advanced)";
     case P_FAST: case P_LAMP_AUTO: case P_AUTO_LAMPS: case P_LAMP_SHADOW_MAPS: case P_LAMP_SHADOW_CUT: case P_SOFT_SUN: case P_LOOK: case P_SKY: case P_SS: return c ? "ON" : "OFF";
     case P_POM: return c ? "ON" : "OFF";
+    case 208: case 211: case 227: case 230: return c ? "ON" : "OFF";   // 1.82: the weather, by itself; 1.84: the dark patch under the car
     case P_SS_HALF: return c ? "half (edges kept)" : "full";
     case P_SS_SKIP: return c ? "ON (only past ours)" : "OFF";
     case P_SUN_PATH: return !c ? "the game's (a loop)" : g_p[P_SS].v > 0.5f ? "ours (by the clock)" : "ours: needs SHADOWS > our shadow maps ON";
@@ -70,6 +128,13 @@ static const char* ChoiceText(int idx, float v)
     case P_LOOK_PRESET: return c == 1 ? "overcast photo" : c == 2 ? "clear and punchy" : c == 3 ? "warm film" : c == 4 ? "photo (DLSS-like)" : "custom";
     case P_KNOCK: return c ? "falls with the post" : "goes out";
     case P_SKY + 14: return c <= 0 ? "25% of the screen" : c == 1 ? "50% of the screen" : c == 2 ? "80% of the screen" : "100% (full)";
+    case 237: {   // 1.89: the weather's kind
+        static char b[96];
+        if (c <= 0) return "by hand (rain, clouds below)";
+        int k = c - 1 < kWxPhaseN ? c - 1 : kWxPhaseN - 1;
+        sprintf(b, "%s%s", kWxPhases[k].name, g_p[P_WX + 3].v > 0.5f ? "   (by itself)" : "");
+        return b;
+    }
     case P_SKY + 12: { static const char* w[] = { "custom", "clear", "fair (cumulus)", "cloudy", "overcast", "storm", "cirrus" }; return w[c < 0 ? 0 : c > 6 ? 6 : c]; }
     }
     return 0;
@@ -82,7 +147,7 @@ static const ViewItem kViewList[] = {
     { 4, "shadows" }, { 33, "shadows" }, { 5, "shadows" }, { 2, "shadows" }, { 16, "shadows" }, { 17, "shadows" }, { 18, "shadows" },
     { 3, "light" }, { 7, "light" }, { 21, "light" }, { 22, "light" }, { 23, "light" }, { 8, "light" }, { 6, "light" },
     { 19, "air" }, { 20, "air" },
-    { 25, "surfaces" }, { 26, "surfaces" }, { 27, "surfaces" }, { 34, "surfaces" }, { 35, "surfaces" }, { 36, "surfaces" },
+    { 25, "surfaces" }, { 26, "surfaces" }, { 27, "surfaces" }, { 34, "surfaces" }, { 35, "surfaces" }, { 36, "surfaces" }, { 37, "surfaces" },
     { 28, "reflections" }, { 29, "reflections" }, { 30, "reflections" }, { 31, "reflections" }, { 32, "reflections" },
 };
 static const int kViewListCount = sizeof(kViewList) / sizeof(kViewList[0]);
@@ -119,7 +184,7 @@ static void BuildMenu()
     g_mlN = 0;
     // ---- title
     MNew();
-    MSegAdd(C_TITLE, "NewLook 1.71   ");
+    MSegAdd(C_TITLE, "NewLook 1.96h  ");
     MSegAdd(g_enabled ? C_ON : C_OFF, g_enabled ? "[ ON ]" : "[ OFF - the game's own picture ]");
     MSegAdd(C_DIM, "  Y      ");
     MSegAdd(C_TITLE, "view: ");
@@ -139,29 +204,67 @@ static void BuildMenu()
             MLINE(i == pos ? C_SEL : C_ITEM, "    %s %s", i == pos ? ">" : " ", kViews[kViewList[i].view]);
         }
     } else {
-        // ---- parameters, in groups (the selected one's group open)
+        // ---- parameters, in groups (the selected one's group open). 1.96: group 0 the menu and quality (always shown),
+        // then the sections: simple, the switch line with its main settings under it when selected; advanced, a heading
+        // per section, its every setting (with sub-headings) when selected
         int selGroup = editSel ? -1 : g_orderGroup[g_sel % g_orderCount];
-        for (int gI = 0; gI < kGroupCount; ++gI) {
+        int selP = editSel ? -1 : SelIdx();
+        bool adv = MenuAdv();
+        for (int gI = 0; gI < g_groupCount; ++gI) {
+            short rows[80];
+            int n = GroupRows(gI, rows);
             bool open = gI == selGroup;
-            MLINE(C_GROUP, "%s %s", open ? "[-]" : "[+]", kGroups[gI].name);
-            if (!open) continue;
-            for (int k = 0; k < kGroups[gI].n; ++k) {
-                int idx = kGroups[gI].items[k];
-                bool sel = g_order[g_sel % g_orderCount] == idx;
-                const Param& P = g_p[idx];
+            int s = gI - 1;
+            bool secOn = s < 0 || g_p[P_SEC0 + s].v > 0.5f;
+            if (s >= 0 && adv) {
                 MNew();
-                MSegAdd(sel ? C_SEL : C_ITEM, "  %s %-34s", sel ? ">" : " ", P.label);
-                const char* ch = ChoiceText(idx, P.v);
-                if (ch) MSegAdd(!strcmp(ch, "OFF") ? C_OFF : !strcmp(ch, "ON") ? C_ON : (sel ? C_SEL : C_ITEM), "%s", ch);
-                else MSegAdd(sel ? C_SEL : C_ITEM, "%.2f", P.v);
-                if (P.v != P.def) MSegAdd(C_DIM, "   (default %g)", P.def);
-                if (g_bench[idx].valid) {
+                MSegAdd(C_GROUP, "%s %-40s", open ? "[-]" : "[+]", kSec[s].name);
+                MSegAdd(secOn ? C_ON : C_OFF, "%s", secOn ? "ON" : "OFF");
+                if (g_qbCost[s] > -1e8f) MSegAdd(g_qbCost[s] > 2 ? C_OFF : C_DIM, "   %s", QbCostText(s));
+                if (!open) continue;
+            }
+            if (s == 0 && !adv) MNew();   // (a gap after the menu and quality)
+            // a long section: the rows round the selection
+            int selRow = 0;
+            for (int k = 0; k < n; ++k) if (rows[k] == selP) selRow = k;
+            int first = 0, last = n;
+            if (open && n > 26) { first = selRow - 12 < 0 ? 0 : selRow - 12; last = first + 26 < n ? first + 26 : n; if (last - first < 26) first = last - 26 < 0 ? 0 : last - 26; }
+            if (first > 0) MLINE(C_DIM, "        ... %d more above", first);
+            for (int k = first; k < last; ++k) {
+                int idx = rows[k];
+                bool head = s >= 0 && k == 0 && !adv;   // the simple view's switch line: the section's name
+                if (!head && !open && s >= 0) break;
+                if (idx < 0) { MLINE(C_DIM, "      - %s -", kSubHeads[-1 - idx]); continue; }
+                bool sel = idx == selP;
+                const Param& P = g_p[idx];
+                float uv = UserValue(idx);
+                bool dim = !secOn && SecOf(idx) < 0;   // (a switched-off section's settings: grey, their own values)
+                MNew();
+                if (head) MSegAdd(sel ? C_SEL : C_GROUP, "%s %-40s", sel ? ">" : " ", kSec[s].name);
+                else if (SecOf(idx) >= 0) MSegAdd(sel ? C_SEL : C_ITEM, "  %s %-34s", sel ? ">" : " ", "the whole section");
+                else MSegAdd(sel ? C_SEL : dim ? C_DIM : C_ITEM, "%s%s %-34s", adv || s < 0 ? "  " : "      ", sel ? ">" : " ", adv ? P.label : SimpleLabel(idx));
+                const char* ch = ChoiceText(idx, uv);
+                if (ch) MSegAdd(dim ? C_DIM : !strcmp(ch, "OFF") ? C_OFF : !strncmp(ch, "ON", 2) ? C_ON : (sel ? C_SEL : C_ITEM), "%s", ch);
+                else MSegAdd(dim ? C_DIM : sel ? C_SEL : C_ITEM, "%.2f", uv);
+                if (head && g_qbCost[s] > -1e8f) MSegAdd(g_qbCost[s] > 2 ? C_OFF : C_DIM, "   %s", QbCostText(s));
+                if (!head && uv != P.def && SecOf(idx) < 0 && idx != P_QUALITY && idx != P_MENU_ADV) MSegAdd(C_DIM, "   (default %g)", P.def);
+                if (dim && SecKilling(idx) >= 0) MSegAdd(C_DIM, "   (the section is off)");
+                if (adv && g_bench[idx].valid) {
                     const BenchRes& r = g_bench[idx];
                     double c = r.on - r.off;
                     if (fabs(c) < r.noise) MSegAdd(C_DIM, "   bench: under the noise (%.2f ms)", r.noise);
                     else MSegAdd(c > 1.0 ? C_OFF : C_DIM, "   bench %+.2f ms%s", c, r.bound ? "" : " (or more)");
                 }
             }
+            if (last < n && open) MLINE(C_DIM, "        ... %d more below", n - last);
+        }
+        // what the selected section is (one line)
+        if (selGroup > 0) { MNew(); MLINE(C_HINT, "%s: %s", kSec[selGroup - 1].name, kSec[selGroup - 1].hint); }
+        // 1.96: the game's own anti-aliasing draws the picture larger (2x: 2560x2880 for 2560x1440): every effect costs that much more
+        if (g_bbW && g_bbH && g_rtW && (double)g_rtW * g_rtH > 1.3 * g_bbW * g_bbH) {
+            double x = (double)g_rtW * g_rtH / ((double)g_bbW * g_bbH);
+            MLINE(C_MSG, "The game's anti-aliasing is ON: it draws %ux%u for a %ux%u screen (x%.1f the pixels): every effect costs x%.1f.", g_rtW, g_rtH, g_bbW, g_bbH, x, x);
+            MLINE(C_MSG, "    Turned off in the game's graphics options: much faster.");
         }
     }
 
@@ -225,12 +328,15 @@ static void BuildMenu()
     }
     if (g_viewPicker) MLINE(C_HINT, "keys: I/O choose a view   U close");
     else if (editSel) MLINE(C_HINT, "keys: I/O pick a value   K/L change   arrows/squares/ring: hold LMB and move the mouse   Del delete");
-    else MLINE(C_HINT, "keys: I/O select   Shift+I/O group   K/L change   J default   H save all   P hide   Shift+P reload   Shift+U capture   B bench");
-        MLINE(C_HINT, "bench: B the selected setting   Ctrl+B every effect%s   Ctrl+Shift+B store a viewpoint (DroneCam's free camera)",
-              g_bptN ? "" : " (here: no viewpoints stored)");
-        if (g_bptN) MLINE(C_DIM, "      %d bench viewpoint(s) stored: Ctrl+B runs them all (~12 min each, hands off)", g_bptN);
+    else if (!MenuAdv()) {
+        MLINE(C_HINT, "keys: I/O select   K/L change   Shift+I/O next section   J default   H save   P hide menu   Y the mod on / off");
+        MLINE(C_HINT, "      Ctrl+B benchmark: what costs how much here, day and night (2-3 min; park the car, hands off; B stops)");
+    } else {
+        MLINE(C_HINT, "keys: I/O select   Shift+I/O section   K/L change   J default   H save all   P hide   Shift+P reload   Shift+U capture   U views");
+        MLINE(C_HINT, "bench: Ctrl+B quick (sections, day / night / rain, 2-3 min)   Shift+B the selected setting   B stops");
+    }
     if (g_view == 24) {
-        MLINE(C_HINT, "editor: LMB select / drag   MMB or Shift+K add lamp   Shift+J delete   Shift+L learn found lamps");
+        MLINE(C_HINT, "editor: LMB select / drag   Shift+J or Del delete");
         MLINE(C_HINT, "        Shift+O tie the lamp to an object   Shift+I post template   Shift+B zone   Shift+T shadow research");
         MLINE(C_HINT, "        Ctrl+Z undo  Ctrl+Y redo  (%d / %d)   Ctrl+C copy lamp   Ctrl+V paste   Ctrl+Shift+V paste to lamps within 30 m",
               g_undoN, g_redoN);
@@ -247,12 +353,21 @@ static void BuildMenu()
         char* e = strchr(l2, '\n');
         if (e) *e = 0;
         MLINE(C_DIM, "%s", pt);
-        MLINE(C_DIM, "%s", l2);
+        if (MenuAdv()) MLINE(C_DIM, "%s", l2);
     }
+    for (int q = 0; q < 3; ++q) if (g_qbSummary[q][0]) MLINE(g_qbPhase >= 0 ? C_MSG : q ? C_DIM : C_ITEM, "%s", g_qbSummary[q]);
+    if (!MenuAdv()) { if (g_compileError[0]) MLINE(C_OFF, "HLSL: %.120s", g_compileError); return; }
     MLINE(C_DIM, "lamps: %d found, %d in map, %d lit now   templates %d, auto %d added / %d tied   zones %d", g_lampCount, g_mapCount, g_lampUse,
           g_tplCount, g_autoAdded, g_autoTied, g_zoneCount);
     if (g_benchMod.valid) MLINE(C_DIM, "bench: the whole mod costs %+.2f ms of GPU frame (%.2f -> %.2f ms)", g_benchMod.on - g_benchMod.off, g_benchMod.off, g_benchMod.on);
     MLINE(C_DIM, "lamp shadow maps: %u faces drawn, %u objects drawn last frame (of %u)", g_lsFacesMade, g_lsLastDraws, g_lsLastIdx);
+    if (g_wxRain >= 0)   // 1.82
+        MLINE(C_DIM, "weather: rain %.2f (to %.2f), clouds %.2f (to %.2f), wet ground %.2f, puddles %.2f%s%s%s", g_wxRain, g_wxRainTo, g_wxCloud, g_wxCloudTo,
+              g_wxWet, g_wxPuddle, g_p[P_WX + 3].v > 0.5f || g_p[P_WX_KIND].v > 0.5f ? "   going to: " : "",
+              g_p[P_WX + 3].v > 0.5f || g_p[P_WX_KIND].v > 0.5f ? kWxPhases[g_wxPhase].name : "",
+              g_p[P_WX + 3].v > 0.5f && g_wxPhaseLeft > 0 ? " (by itself)" : "");
+    MLINE(C_DIM, "hitches (frames over 50 ms) since the last log line: %u (%u with our effects off), the worst %.0f ms (%.0f of it the game's own / not hooked)",
+          g_htHitches, g_htHitchesOff, g_htWorst, g_htWorstRest);   // 1.81d (hitch.inc; the log has each one's parts)
     if (g_compileError[0]) MLINE(C_OFF, "HLSL: %.120s", g_compileError);
     else if (!g_sunCount && g_lastReject[0]) MLINE(C_OFF, "skipped: %s", g_lastReject);
 }

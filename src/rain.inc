@@ -34,8 +34,26 @@ struct RainCbE { ID3D11Buffer* b; int off; };
 static RainCbE g_rainCbs[16];
 static int g_rainCbN;
 // the player's car: its world matrix from its own draws (bones), read back a few frames late
-static ID3D11Buffer* g_playerStage[4];
-static unsigned g_playerStageFrame[4];
+// 1.81: 16 copies in a ring (4 were: with the GPU 3-4 frames behind the CPU, a copy was written over before it could
+// be read: the car "lost" for hundreds of frames, as the scene's load went)
+static const int kPlayerStages = 16;
+static ID3D11Buffer* g_playerStage[kPlayerStages];
+static unsigned g_playerStageFrame[kPlayerStages];
+static ID3D11Query* g_playerStageQ[kPlayerStages];   // 1.81c: an event after that frame's copies (asked without a flush)
+static bool g_playerStageQd[kPlayerStages];
+static double g_playerCpuRb;                         // 1.81c: (the log) the read-back's CPU time, the most in a frame
+static int g_playerStageN[kPlayerStages];      // 1.77: car draws (bones, not a wheel) copied that frame: up to 64 candidates (1.81; 32 were full)
+static unsigned long long g_playerStageKey[kPlayerStages][64];   // 1.78: each one's mesh (index / vertex buffers and range)
+static unsigned g_playerStageCnt[kPlayerStages][64];
+static float g_playerNowT[3];                        // 1.81: its part's place this frame (our copy of its constants)
+static unsigned g_playerNowTag;             // 1.81: its size (indices / vertices drawn)
+static unsigned g_playerKeyDrawn;                    // 1.81: the frame (+1) the player's part was last drawn
+static unsigned g_playerSwitches, g_playerNoGpu;     // 1.81: (the log) its part changed; frames without its matrix on the GPU
+static unsigned long long g_playerKey;               // the player's part (picked by RainBind), known by its mesh
+static ID3D11Buffer* g_playerGpu;                    // its matrix this frame, copied on the GPU (t77)
+static ID3D11ShaderResourceView* g_playerGpuSrv;
+static unsigned g_playerReads, g_playerCands, g_playerRejects;   // (the log, now and then)
+static float g_playerPickD;
 static float g_playerMat[16];
 static unsigned g_playerSeen;
 static float g_playerMatOld[16];   // 1.59: the one before (its motion: the player's car where it is now, a frame ago)
@@ -248,16 +266,139 @@ static void RainAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     if (savedRs) savedRs->Release();
 }
 
+// 1.84: the frame's car draws (bones, not a wheel) with their world matrices from our copy of the game's constants: the
+// player's car found from these in the same frame (RainFrame), no read-back (the read-back's prediction drifted while
+// copies came late: the car "lost", its pose off: its own shading, the dark patch under it, the drops all off)
+static float g_pcW[64][16];
+static unsigned long long g_pcKey[64];
+static unsigned g_pcCnt[64];
+static int g_pcN;
+static unsigned g_pcFrame, g_playerCpuPicks, g_playerGroupN;
+// 1.90: where the player's car sits in the camera's view (this frame's view-projection, from a car draw's own constants:
+// no lag): its place in clip x, y and w (~ metres to the side, up, ahead), learnt while it is followed. A car that is
+// lost (a car changed at a jack spot, a race's start, a teleport) is found again by that place (1.84 took the car
+// nearest the camera: a parked car, a rival), and for 10 s after that a car steadily there replaces a wrong pick.
+static float g_pcVP[16];
+static unsigned g_pcVPFrame;
+static float g_plSpot[3] = { 0, -2.2f, 6.0f };   // (a chase camera's, until learnt: ~1.3 m under it, 6 m ahead)
+static unsigned g_plSpotN, g_plAcq, g_plRepick, g_plRepicks, g_plByKey, g_plBySpot, g_plToRoot;
+static float g_plSpotErr = -1;
+static bool PcSpot(const float* p, float* s)
+{
+    const float* r = g_pcVP;
+    float d = r[8] * p[0] + r[9] * p[1] + r[10] * p[2] + r[11];
+    s[0] = r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3];
+    s[1] = r[4] * p[0] + r[5] * p[1] + r[6] * p[2] + r[7];
+    s[2] = d * r[14] + r[15];
+    return s[0] == s[0] && s[2] == s[2];
+}
+static float SpotErr(const float* s)
+{
+    float dx = s[0] - g_plSpot[0], dy = s[1] - g_plSpot[1], dw = s[2] - g_plSpot[2];
+    return sqrtf((dx * dx + dy * dy) * 0.6f + dw * dw);
+}
+static void PlayerGpuEnsure()
+{
+    if (g_playerGpu) return;
+    D3D11_BUFFER_DESC d = {};
+    d.ByteWidth = 64; d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+    sv.Format = DXGI_FORMAT_R32G32B32A32_FLOAT; sv.ViewDimension = D3D11_SRV_DIMENSION_BUFFER; sv.Buffer.NumElements = 4;
+    if (FAILED(g_dev->CreateBuffer(&d, 0, &g_playerGpu)) || FAILED(g_dev->CreateShaderResourceView(g_playerGpu, &sv, &g_playerGpuSrv))) {
+        if (g_playerGpu) g_playerGpu->Release();
+        g_playerGpu = 0; g_playerGpuSrv = 0;
+    }
+}
+static bool MatSame(const float* a, const float* b)
+{
+    for (int i = 0; i < 15; ++i) if (fabsf(a[i] - b[i]) > 1e-3f * (1 + fabsf(a[i]))) return false;
+    return true;
+}
+static void CarMapRecord(ID3D11DeviceContext* ctx, VsInfo* e, const DrawCall& d, unsigned long long key);   // (carrain.inc)
+static void CarGlassAfterDraw(ID3D11DeviceContext* ctx, VsInfo* e, const DrawCall& d);                      // (carrain.inc)
 // the player's car (bones, not a wheel) in the main view: its world matrix into this frame's staging buffer
-static void RainPlayerAfterDraw(ID3D11DeviceContext* ctx)
+static void RainPlayerAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& dc)
 {
     VsInfo* e = DrawVs(ctx);   // (1.65: asked once a draw)
     if (!e || !(e->carBits & 4) || (e->carBits & 1) || e->wSlot < 0 || !MainTarget(ctx)) return;
-    int k = g_frame & 3;
-    if (g_playerStageFrame[k] == g_frame + 1) return;   // one a frame
+    // 1.77: every such draw of the frame (up to 32), not the first only: a traffic car near the camera drawn first was
+    // taken for the player's (its drops, its shading and the rest went to that car); RainBind picks the one that is the
+    // player's by where it was
+    // 1.78: the draw's mesh: the player's part is known by it (1.77 took the candidate nearest to where the car was:
+    // the car's parts have their own matrices (doors, bumpers: other origins): it jumped between parts, the car lost)
+    unsigned long long key = 0;
+    {
+        ID3D11Buffer *ib = 0, *vb = 0; DXGI_FORMAT f; UINT io = 0, st = 0, vo = 0;
+        ctx->IAGetIndexBuffer(&ib, &f, &io);
+        ctx->IAGetVertexBuffers(0, 1, &vb, &st, &vo);
+        key = ((unsigned long long)(size_t)ib * 0x9E3779B1u) ^ ((unsigned long long)(size_t)vb << 21) ^ ((unsigned long long)io << 7) ^ vo ^
+              ((unsigned long long)dc.a << 40) ^ ((unsigned long long)dc.b << 13) ^ (unsigned long long)(unsigned)dc.base;
+        if (ib) ib->Release();
+        if (vb) vb->Release();
+        if (!key) key = 1;
+    }
+    {   // 1.84: its world matrix now (our copy of the constants): the player's car is found from these (RainFrame)
+        ID3D11Buffer* wcb = 0;
+        ctx->VSGetConstantBuffers(e->wSlot, 1, &wcb);
+        const unsigned char* data = 0;
+        UINT size = 0;
+        if (wcb && WeCbNow(wcb, &data, &size) == 1 && (UINT)e->wOff + 64 <= size) {
+            if (g_pcFrame != g_frame + 1) { g_pcFrame = g_frame + 1; g_pcN = 0; }
+            if (g_pcN < 64) { memcpy(g_pcW[g_pcN], data + e->wOff, 64); g_pcKey[g_pcN] = key; g_pcCnt[g_pcN] = dc.a; ++g_pcN; }
+        }
+        if (wcb) wcb->Release();
+        if (g_pcVPFrame != g_frame + 1 && e->vpSlot >= 0 && !(e->vpOff & 15)) {   // 1.90: the main view's view-projection, once a frame
+            ID3D11Buffer* vcb = 0;
+            ctx->VSGetConstantBuffers(e->vpSlot, 1, &vcb);
+            const unsigned char* vd = 0;
+            UINT vs = 0;
+            if (vcb && WeCbNow(vcb, &vd, &vs) == 1 && (UINT)e->vpOff + 64 <= vs) { memcpy(g_pcVP, vd + e->vpOff, 64); g_pcVPFrame = g_frame + 1; }
+            if (vcb) vcb->Release();
+        }
+    }
+    CarMapRecord(ctx, e, dc, key);   // 1.80: its shape (carrain.inc), now and then
+    if (key == g_playerKey) {
+        g_playerKeyDrawn = g_frame + 1;
+        ID3D11Buffer* wcb = 0;
+        ctx->VSGetConstantBuffers(e->wSlot, 1, &wcb);
+        const unsigned char* data = 0;
+        UINT size = 0;
+        if (wcb && WeCbNow(wcb, &data, &size) == 1 && (UINT)e->wOff + 64 <= size) { memcpy(g_playerNowT, data + e->wOff + 48, 12); g_playerNowTag = g_frame + 1; }
+        if (wcb) wcb->Release();
+    }
+    CarGlassAfterDraw(ctx, e, dc);   // 1.81: the drops on its glass (carrain.inc)
+    if (key == g_playerKey && g_playerGpuFrame != g_frame + 1) {   // this frame's matrix of the player's part: for the shaders now
+        if (!g_playerGpu) {
+            D3D11_BUFFER_DESC d = {};
+            d.ByteWidth = 64; d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+            sv.Format = DXGI_FORMAT_R32G32B32A32_FLOAT; sv.ViewDimension = D3D11_SRV_DIMENSION_BUFFER; sv.Buffer.NumElements = 4;
+            if (FAILED(g_dev->CreateBuffer(&d, 0, &g_playerGpu)) || FAILED(g_dev->CreateShaderResourceView(g_playerGpu, &sv, &g_playerGpuSrv))) {
+                if (g_playerGpu) g_playerGpu->Release();
+                g_playerGpu = 0; g_playerGpuSrv = 0;
+            }
+        }
+        ID3D11Buffer* cb = 0;
+        ctx->VSGetConstantBuffers(e->wSlot, 1, &cb);
+        if (cb && g_playerGpu) {
+            D3D11_BUFFER_DESC bd;
+            cb->GetDesc(&bd);
+            if ((UINT)e->wOff + 64 <= bd.ByteWidth) {
+                D3D11_BOX box = { (UINT)e->wOff, 0, 0, (UINT)e->wOff + 64, 1, 1 };
+                ctx->CopySubresourceRegion(g_playerGpu, 0, 0, 0, 0, cb, 0, &box);
+                g_playerGpuFrame = g_frame + 1;
+            }
+        }
+        if (cb) cb->Release();
+    }
+    int k = g_frame % kPlayerStages;
+    if (g_playerStageFrame[k] != g_frame + 1) { g_playerStageFrame[k] = g_frame + 1; g_playerStageN[k] = 0; g_playerStageQd[k] = false; }
+    if (g_playerStageN[k] >= 64) return;
+    g_playerStageKey[k][g_playerStageN[k]] = key;
+    g_playerStageCnt[k][g_playerStageN[k]] = dc.a;
     if (!g_playerStage[k]) {
         D3D11_BUFFER_DESC d = {};
-        d.ByteWidth = 64; d.Usage = D3D11_USAGE_STAGING; d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        d.ByteWidth = 64 * 64; d.Usage = D3D11_USAGE_STAGING; d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         if (FAILED(g_dev->CreateBuffer(&d, 0, &g_playerStage[k]))) return;
     }
     ID3D11Buffer* cb = 0;
@@ -267,30 +408,213 @@ static void RainPlayerAfterDraw(ID3D11DeviceContext* ctx)
     cb->GetDesc(&bd);
     if ((UINT)e->wOff + 64 <= bd.ByteWidth) {
         D3D11_BOX box = { (UINT)e->wOff, 0, 0, (UINT)e->wOff + 64, 1, 1 };
-        ctx->CopySubresourceRegion(g_playerStage[k], 0, 0, 0, 0, cb, 0, &box);
-        g_playerStageFrame[k] = g_frame + 1;
+        ctx->CopySubresourceRegion(g_playerStage[k], 0, 64 * g_playerStageN[k], 0, 0, cb, 0, &box);
+        ++g_playerStageN[k];
     }
     cb->Release();
 }
 
-// the constants for the shaders (b13) and the map (t51); once a frame, bound where wetness is used
-static void RainBind(ID3D11DeviceContext* ctx)
+// the player's car this frame (1.84: from its draws' constants; else the read-back), the constants for the shaders (b13);
+// once a frame: before the sun pass's constants (newlook.cpp) and wherever the wetness binds them first
+static void RainFrame(ID3D11DeviceContext* ctx)
 {
     if (!g_rainCb) return;
     static unsigned filled;
     if (filled != g_frame + 1) {
         filled = g_frame + 1;
-        // the player's car: the newest finished copy
-        for (int k = 0; k < 4; ++k) {
-            if (!g_playerStageFrame[k] || g_playerStageFrame[k] + 2 > g_frame + 1) continue;
-            D3D11_MAPPED_SUBRESOURCE m;
-            if (ctx->Map(g_playerStage[k], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m) == S_OK) {
-                const float* f = (const float*)m.pData;
-                if (g_playerStageFrame[k] > g_playerSeen && f[15] == f[15] && fabsf(f[5]) > 0.3f) { memcpy(g_playerMatOld, g_playerMat, 64); g_playerSeenOld = g_playerSeen; memcpy(g_playerMat, f, 64); g_playerSeen = g_playerStageFrame[k]; }
-                ctx->Unmap(g_playerStage[k], 0);
-                g_playerStageFrame[k] = 0;
+        // 1.84: the player's car from this frame's car draws: their matrices grouped (a car's parts on its root share
+        // one); near where it was (carried on at its speed), the group with the most draws (then the most drawn, then
+        // the nearest); lost a second: the group with the most draws nearest the camera. Its root: the car's pose of
+        // now, for the shaders too (t77)
+        if (g_pcFrame == g_frame + 1 && g_pcN > 0) {
+            int grp[64], gN[64] = {};
+            unsigned gC[64] = {};
+            for (int i = 0; i < g_pcN; ++i) {
+                grp[i] = i;
+                for (int j = 0; j < i; ++j) if (grp[j] == j && MatSame(g_pcW[i], g_pcW[j])) { grp[i] = j; break; }
+                ++gN[grp[i]]; gC[grp[i]] += g_pcCnt[i];
+            }
+            bool locked = g_playerSeen && g_frame + 1 - g_playerSeen < 60;
+            float pred[3] = { g_playerMat[12], g_playerMat[13], g_playerMat[14] };
+            if (locked && g_playerSeenOld && g_playerSeen > g_playerSeenOld) {
+                float ahead = (float)(g_frame + 1 - g_playerSeen) / (float)(g_playerSeen - g_playerSeenOld);
+                for (int j = 0; j < 3; ++j) pred[j] += (g_playerMat[12 + j] - g_playerMatOld[12 + j]) * ahead;
+            }
+            float reach = 3.0f + 0.5f * (float)(g_frame + 1 - g_playerSeen);
+            // 1.90: each group's mesh (its biggest draw) and its place in the view
+            bool vpOk = g_pcVPFrame == g_frame + 1;
+            bool spotKnown = vpOk && g_plSpotN >= 60;
+            unsigned long long gKey[64];
+            float gSpot[64][3], gErr[64];
+            bool hasKey[64] = {};
+            for (int i = 0; i < g_pcN; ++i) {
+                if (grp[i] != i) continue;
+                int km = i;
+                for (int j = i; j < g_pcN; ++j) if (grp[j] == i && g_pcCnt[j] > g_pcCnt[km]) km = j;
+                gKey[i] = g_pcKey[km];
+                gErr[i] = vpOk && PcSpot(g_pcW[i] + 12, gSpot[i]) ? SpotErr(gSpot[i]) : 1e9f;
+            }
+            // (1.91: only a group of 3+ draws holds by its mesh: 1.90 held on a part with its own matrix, a door, a wheel:
+            // the car's underside and its boxes then off the car)
+            for (int i = 0; i < g_pcN; ++i) if (g_playerKey && g_pcKey[i] == g_playerKey && gN[grp[i]] >= 3) hasKey[grp[i]] = true;
+            // locked: its own mesh near where it should be (or anywhere: a teleport); else nearest there (its own parts: a
+            // door, a bumper have their own matrices: the group with more draws when about as near); lost: the car at its
+            // place in the view (not known yet: the one nearest the camera with the most draws, as 1.84)
+            int best = -1;
+            float bs = 1e30f, bd = 0;
+            bool byKey = false;
+            for (int i = 0; i < g_pcN; ++i) {
+                if (grp[i] != i) continue;
+                const float* f = g_pcW[i];
+                if (!(f[15] == f[15]) || fabsf(f[5]) <= 0.3f) continue;
+                float d2 = Dist2(f + 12, pred), sc;
+                if (locked && hasKey[i]) sc = d2 - 1e12f;
+                else if (locked) {
+                    if (d2 > reach * reach) continue;
+                    sc = d2 - 0.6f * (float)(gN[i] < 10 ? gN[i] : 10);
+                } else if (vpOk && gErr[i] < 1e8f) sc = gErr[i] * gErr[i] + (gN[i] < 3 ? 100.0f : 0.0f);
+                else sc = (g_camKnown ? Dist2(f + 12, g_cam[3]) : 0.0f) - 100.0f * (float)(gN[i] < 10 ? gN[i] : 10);
+                if (sc < bs) { bs = sc; best = i; bd = d2; byKey = locked && hasKey[i]; }
+            }
+            if (best >= 0 && !locked) { g_plAcq = g_frame + 1; g_plRepick = 0; Log("player car: found again (%s; %d car draws)", vpOk ? (spotKnown ? "by its place in the view" : "by a chase camera's place, not learnt yet") : "the nearest the camera", g_pcN); }
+            // a wrong pick (within 10 s of finding it again): another car sitting steadily at its place in the view while
+            // the picked one is far from it: that one, after 20 frames
+            if (best >= 0 && spotKnown && g_plAcq && g_frame + 1 - g_plAcq < 600 && gErr[best] < 1e8f) {
+                int alt = -1;
+                for (int i = 0; i < g_pcN; ++i)
+                    if (grp[i] == i && i != best && gN[i] >= 3 && Dist2(g_pcW[i] + 12, g_pcW[best] + 12) > 9.0f && (alt < 0 || gErr[i] < gErr[alt])) alt = i;
+                if (alt >= 0 && gErr[best] > 2.0f && gErr[alt] < 0.8f) {
+                    if (++g_plRepick >= 20) {
+                        Log("player car: another car at its place in the view (%.1f m off it, the picked one %.1f m): taken", gErr[alt], gErr[best]);
+                        best = alt; byKey = false; g_plRepick = 0; ++g_plRepicks; g_plAcq = g_frame + 1;
+                    }
+                } else g_plRepick = 0;
+            }
+            // 1.91: a part picked (its own matrix, under 3 draws): the car's root, the nearest group of 3+ draws within 2 m
+            // (not the one with the most: a rival rubbing its side is as near)
+            if (best >= 0 && gN[best] < 3) {
+                int root = -1;
+                float rd = 4.0f;
+                for (int i = 0; i < g_pcN; ++i) {
+                    if (grp[i] != i || gN[i] < 3 || fabsf(g_pcW[i][5]) <= 0.3f) continue;
+                    float d = Dist2(g_pcW[i] + 12, g_pcW[best] + 12);
+                    if (d < rd) { rd = d; root = i; }
+                }
+                if (root >= 0) { ++g_plToRoot; best = root; byKey = false; bd = Dist2(g_pcW[best] + 12, pred); }
+            }
+            if (best >= 0) {
+                if (byKey) ++g_plByKey; else if (vpOk && !locked) ++g_plBySpot;
+                // its place in the view learnt while followed (near the known one: quickly; far, with no other car there:
+                // slowly: a new camera)
+                if (gErr[best] < 1e8f && gN[best] >= 3) {   // (1.91: not from a part)
+                    float e = g_plSpotN >= 60 ? gErr[best] : 0.0f;
+                    float alt = 1e9f;
+                    for (int i = 0; i < g_pcN; ++i) if (grp[i] == i && i != best && Dist2(g_pcW[i] + 12, g_pcW[best] + 12) > 9.0f && gErr[i] < alt) alt = gErr[i];
+                    float k = e < 2.0f ? 0.05f : alt > 2.5f ? 0.01f : 0.0f;
+                    if (locked || g_plSpotN < 60) {
+                        for (int j = 0; j < 3; ++j) g_plSpot[j] += (gSpot[best][j] - g_plSpot[j]) * (g_plSpotN ? k : 1.0f);
+                        ++g_plSpotN;
+                    }
+                    g_plSpotErr = gErr[best];
+                }
+                int km = best;
+                for (int i = 0; i < g_pcN; ++i) if (grp[i] == best && g_pcCnt[i] > g_pcCnt[km]) km = i;
+                // (1.91: its mesh only from the car's root: a part's would hold the pick on that part)
+                if (gN[best] >= 3) {
+                    if (g_playerKey != g_pcKey[km]) { ++g_playerSwitches; g_plAcq = g_frame + 1; }   // (1.90: a new part / car: a wrong one may be replaced for 10 s)
+                    g_playerKey = g_pcKey[km];
+                    g_playerKeyDrawn = g_frame + 1;
+                }
+                memcpy(g_playerMatOld, g_playerMat, 64); g_playerSeenOld = g_playerSeen;
+                memcpy(g_playerMat, g_pcW[best], 64); g_playerSeen = g_frame + 1;
+                memcpy(g_playerNowT, g_pcW[best] + 12, 12); g_playerNowTag = g_frame + 1;
+                g_playerPickD = locked ? sqrtf(bd) : -1;
+                g_playerGroupN = gN[best];
+                ++g_playerCpuPicks;
+                PlayerGpuEnsure();
+                if (g_playerGpu) { ctx->UpdateSubresource(g_playerGpu, 0, 0, g_pcW[best], 0, 0); g_playerGpuFrame = g_frame + 1; }
             }
         }
+        // the player's car: the newest finished copy. 1.81c: this frame's copies (its car draws in the main view are done
+        // by now) get an event; of the copies the GPU has done (the event asked without a flush) only the newest is
+        // mapped, the older ones dropped (1.81b mapped every copy 2+ frames old without waiting: a busy one failed, and
+        // made the driver flush mid-frame, 2-3 times a frame)
+        LARGE_INTEGER rb0; QueryPerformanceCounter(&rb0);
+        {
+            int kc = g_frame % kPlayerStages;
+            if (g_playerStageFrame[kc] == g_frame + 1 && !g_playerStageQd[kc]) {
+                if (!g_playerStageQ[kc]) { D3D11_QUERY_DESC qd = { D3D11_QUERY_EVENT, 0 }; if (FAILED(g_dev->CreateQuery(&qd, &g_playerStageQ[kc]))) g_playerStageQ[kc] = 0; }
+                if (g_playerStageQ[kc]) { ctx->End(g_playerStageQ[kc]); g_playerStageQd[kc] = true; }
+            }
+        }
+        int newest = -1;
+        bool done[kPlayerStages] = {};
+        for (int k = 0; k < kPlayerStages; ++k) {
+            if (!g_playerStageFrame[k] || !g_playerStageQd[k] || g_playerStageFrame[k] >= g_frame + 1) continue;
+            done[k] = ctx->GetData(g_playerStageQ[k], 0, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK;
+            if (done[k] && (newest < 0 || g_playerStageFrame[k] > g_playerStageFrame[newest])) newest = k;
+        }
+        for (int k = 0; k < kPlayerStages; ++k) {
+            if (!done[k]) continue;
+            if (k != newest) { g_playerStageFrame[k] = 0; g_playerStageQd[k] = false; continue; }
+            D3D11_MAPPED_SUBRESOURCE m;
+            if (ctx->Map(g_playerStage[k], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m) == S_OK) {
+                // 1.78: the player's among the frame's car draws: its own part (the same mesh as before) near where the car
+                // should be now (its last place carried on at its speed: within 2.5 m); lost for a second: its part
+                // anywhere, else the frame's first car draw (as before 1.77)
+                bool locked = g_playerSeen && g_frame + 1 - g_playerSeen < 60;
+                float pred[3] = { g_playerMat[12], g_playerMat[13], g_playerMat[14] };
+                if (locked && g_playerSeenOld && g_playerSeen > g_playerSeenOld) {
+                    float ahead = (float)(g_playerStageFrame[k] - g_playerSeen) / (float)(g_playerSeen - g_playerSeenOld);
+                    for (int j = 0; j < 3; ++j) pred[j] += (g_playerMat[12 + j] - g_playerMatOld[12 + j]) * ahead;
+                }
+                // 1.81: its part kept while that is drawn (a frame it was not among the candidates, or a little off
+                // where it should be, had another part taken: a door, a bumper, with their own origins: the drops, the
+                // shape, all off, "the car lost"); a new part only when it is no longer drawn: the biggest mesh there
+                // (the body), not the nearest
+                bool keyAlive = g_playerKey && g_playerKeyDrawn && g_frame + 1 - g_playerKeyDrawn < 20;
+                int best = -1;
+                float bd = 1e30f, bs = 1e30f;
+                for (int i = 0; i < g_playerStageN[k]; ++i) {
+                    const float* f = (const float*)m.pData + i * 16;
+                    if (!(f[15] == f[15]) || fabsf(f[5]) <= 0.3f) continue;
+                    bool same = g_playerStageKey[k][i] == g_playerKey;
+                    float d = Dist2(f + 12, pred), sc;
+                    if (locked) {
+                        if (d > (same ? 6.0f * 6.0f : 2.5f * 2.5f) || (!same && keyAlive)) continue;
+                        sc = same ? d - 1e9f : -(float)g_playerStageCnt[k][i];
+                    } else sc = same ? -1.0f : (float)i;
+                    if (sc < bs) { bs = sc; bd = d; best = i; }
+                }
+                ++g_playerReads; g_playerCands += g_playerStageN[k];
+                if (best >= 0 && g_playerStageFrame[k] > g_playerSeen) {
+                    const float* f = (const float*)m.pData + best * 16;
+                    if (g_playerKey != g_playerStageKey[k][best]) ++g_playerSwitches;
+                    g_playerKey = g_playerStageKey[k][best];
+                    memcpy(g_playerMatOld, g_playerMat, 64); g_playerSeenOld = g_playerSeen; memcpy(g_playerMat, f, 64); g_playerSeen = g_playerStageFrame[k];
+                    g_playerPickD = locked ? sqrtf(bd) : -1;
+                } else if (best >= 0) ++g_playerRejects;
+                if (g_frame % 900 == 0 && g_playerReads) {
+                    Log("player car: %.1f car draws a frame, the last pick %.2f m from where it should be, frames with none near %u; seen %u frames ago; "
+                        "its matrix on the GPU this frame %d; its part changed %u times, frames without its matrix %u; found from our constants' copies "
+                        "%u times (its group: %u draws); 1.90: by its mesh %u, by its place in the view %u, wrong picks replaced %u, a part's pick moved to its car's root %u; its place in the view "
+                        "%.2f %.2f %.2f (now %.2f off)", (float)g_playerCands / g_playerReads, g_playerPickD, g_playerRejects, g_frame + 1 - g_playerSeen,
+                        g_playerGpuFrame == g_frame + 1, g_playerSwitches, g_playerNoGpu, g_playerCpuPicks, g_playerGroupN, g_plByKey, g_plBySpot, g_plRepicks, g_plToRoot,
+                        g_plSpot[0], g_plSpot[1], g_plSpot[2], g_plSpotErr);
+                    g_playerReads = g_playerCands = g_playerRejects = g_playerSwitches = g_playerNoGpu = g_playerCpuPicks = 0;
+                    g_plByKey = g_plBySpot = g_plRepicks = g_plToRoot = 0;
+                }
+                ctx->Unmap(g_playerStage[k], 0);
+                g_playerStageFrame[k] = 0;
+                g_playerStageQd[k] = false;
+            }
+        }
+        {
+            LARGE_INTEGER rb1; QueryPerformanceCounter(&rb1);
+            double ms = g_qpf.QuadPart ? (rb1.QuadPart - rb0.QuadPart) * 1000.0 / g_qpf.QuadPart : 0;
+            if (ms > g_playerCpuRb) g_playerCpuRb = ms;
+        }
+        if (g_playerSeen && g_playerGpuFrame != g_frame + 1) ++g_playerNoGpu;
         float c[224] = {};
         c[0] = g_rainC[0]; c[1] = g_rainC[1]; c[2] = kRainHalf; c[3] = g_rainC[2];
         c[4] = kRainRange; c[5] = g_rainCur >= 0 ? 1.0f : 0.0f;
@@ -355,7 +679,15 @@ static void RainBind(ID3D11DeviceContext* ctx)
         D3D11_MAPPED_SUBRESOURCE m;
         if (SUCCEEDED(ctx->Map(g_rainCb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, c, 896); ctx->Unmap(g_rainCb, 0); }
     }
+}
+// the constants (b13) and the map (t51), bound where wetness is used
+static void RainBind(ID3D11DeviceContext* ctx)
+{
+    if (!g_rainCb) return;
+    RainFrame(ctx);
     ctx->PSSetConstantBuffers(13, 1, &g_rainCb);
     ID3D11ShaderResourceView* v = g_rainCur >= 0 ? g_rainSrv[g_rainCur] : 0;
     ctx->PSSetShaderResources(51, 1, &v);
+    ID3D11ShaderResourceView* pm = g_playerGpuFrame == g_frame + 1 ? g_playerGpuSrv : 0;   // 1.78: t77
+    ctx->PSSetShaderResources(77, 1, &pm);
 }

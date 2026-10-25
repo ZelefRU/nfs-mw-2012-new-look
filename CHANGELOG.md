@@ -4,6 +4,28 @@ NewLook was called NFSLight up to 1.63.
 
 Newest first. Every entry is detailed in [docs/DEVLOG.md](docs/DEVLOG.md).
 
+- 1.96h (2026-10-25): no white 1-pixel rims at things' edges (the anti-shimmer no longer counts a silhouette as bumps)
+- 1.96g (2026-10-25): faster clouds with the same look (SkyFast 1; 2 = faster, changes the look); SsrEdges: an edge-on pixel reflects as face on
+- 1.96f (2026-10-25): a cheaper cloud march; the sky's GPU cost shown in parts (clouds, cloud shadows, sky)
+- 1.96e (2026-10-25): the benchmark shows each section's share of NewLook's cost, with the FPS of its own scene
+- 1.96d (2026-10-25): the mod's clock is the game's own (no time jumps); the benchmark's night scene fixed
+- 1.96c (2026-10-25): the clock by the game's day and night; the benchmark puts the sun's path back
+- 1.96b (2026-10-25): the dawn clock, the moon's shape; all sections off = the game's look; the benchmark (Ctrl+B) by the game's own clock
+- 1.96 (2026-10-25): the player menu (simple / advanced, 14 sections on / off, quality presets); the quick benchmark with a report; AMD: no run-time indexed arrays in the lamp shaders; less CPU per draw; "cpu:" / "gpu:" log lines; a warning when the game's AA is on
+- 1.95 (2026-10-25): no sun in the game's night
+- 1.94 (2026-10-25): the game's own reflections in our sky's colour; the reflected sky from the probe
+- 1.93 (2026-10-25): the game's sun corona under our clouds
+- 1.92 (2026-10-25): the game's sun glare under our clouds
+- 1.91 (2026-10-25): the glow round the sun in a storm; the player's car pick held
+- 1.90 (2026-10-25): no rectangle round the car on wet roads; the player's car picked by its mesh
+- 1.89 (2026-10-25): less sun through a thick cloud deck; weather kinds and their walk
+- 1.88 / 1.88b (2026-10-25): rain and the car's drops easier to see; rain lit by the headlights
+- 1.87 (2026-10-24): wind in the trees' leaves
+- 1.84 .. 1.86 (2026-10-24): rain on the lens, splashes on the ground, rain speed, the camera's direction for them
+- 1.82 / 1.83 (2026-10-24): the weather's state (rain by hand or by itself: sky, wet ground, puddles); falling rain, splashes, ripples, wind; a hitch finder
+- 1.74 .. 1.81d (2026-10-24): rain drops on the player's car, simulated on its shape (merging, running, on the glass); shaders compiled on a worker
+- 1.73 (2026-10-24): no sky glow under the player's car
+- 1.72 (2026-10-24): the player's car in puddles as a flat underside; puddle rims; a denser storm preset
 - 1.71 (2026-10-24): reflections without a 1-pixel outline round thin things (a 4x4 depth-aware gather)
 - 1.70 (2026-10-24): cars dry in reflections (no shining tyre tops), cars as boxes in puddle reflections, a median filter against dark / bright dots
 - 1.69 (2026-10-24): cars shaded with care (smoothed sun shadow, gentler screen-space AO / contact, less blue in shade)
