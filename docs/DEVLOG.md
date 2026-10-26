@@ -2633,3 +2633,874 @@ Waiting for the user's screenshots of the current glitches.
   NewLook_v196g.hlsl.bak, NewLook_v196g.asi.bak, NewLook_v196g_installed.hlsl.bak. The game was running:
   NewLook_v196h_pending.asi/.hlsl, a wait-and-copy installs them when it closes.
 
+## Release 1.96h packaged (2026-10-25)
+- User (Zelef): prepare the release: a git commit, the zip with his current settings and the weather section off, a
+  message for the AMD player, the full changelog for Nexus and the GitHub release.
+- The repo (publish/github/NewLook): src (8 new .inc), worldtools scripts, TODO, docs/DEVLOG (local paths and the
+  player's name taken out), CHANGELOG 1.72 .. 1.96h, READMEs (menu, sections, bench keys, costs, the game's AA, rain /
+  weather / wind, known issues). Commit 4383656 (not pushed).
+- publish/release/NewLook_1.96h(.zip): dinput8.dll (Ultimate ASI Loader), scripts: asi, hlsl, the user's ini (SecWeather 0,
+  SkyFast 1: his saved 0 was from the A/B; SpecAA left at his 0), his lamps, zones, presets, templates, carlights.
+  No FPS Unlock. um publish check: PASS, 13 files.
+- Texts: publish/github/release_1.96h.md (EN, full), publish/nexus/update_1.96h.txt (EN + RU), description_en/ru
+  ("what's new", keys), summary (version), message_amd_1.96h.txt.
+- All 35 shader entries (with the PS_Sun variants) compile with fxc; 1.96h itself not yet run in game.
+
+## 1.96i (2026-10-26): bright lines along contact lines in reflections; the grain in the clouds overhead
+- User (Zelef), 1.96h (it runs): bright (orange at dusk) lines in the wet ground's reflections along every foot: a wall
+  on the pavement, under the curb, round a bin's and a phone booth's base; the curb's went with "rays jittered" off.
+  And grain in the clouds straight above, at any resolution, SkyFast 0 too.
+- Cause (lines): a near hit was faded to the sky (1.60, conf x saturate(tHit / 0.3 - 0.2), meant for a car lamp's
+  housing): at a contact line every hit is near. Now only off floors (gN.y). And the march's first step (0.1 .. 1 m with
+  the jitter) went over a 15 cm curb into the sky: 3 near steps first (0.08 / 0.16 / 0.32 m x 0.75 .. 1.25), their own
+  tolerance (8 cm + 0.6 t).
+- Cause (grain, likely): the resolve reprojected the clouds' history at 400 m for every direction; overhead they are
+  1.5 km up, so with any camera motion the history slid and was clamped away. Now at the clouds' base along the ray
+  (400 .. 30000 m); this frame's share of a fresh pixel 0.35 -> 0.25.
+- fxc: all 35 entries + clouds / resolve / main clean. Builds. Backups src/*_v196h.*.bak, NewLook_v196h.hlsl.bak,
+  NewLook_v196h.asi.bak, NewLook_v196h_installed.hlsl.bak. The game was running: NewLook_v196i_pending.*, installed
+  by a wait-and-copy when it closes. The release zip (1.96h) not rebuilt yet.
+
+## 1.96j (2026-10-26): the street lamps cheaper at night (tiles cut by depth, weak lamps' shadow rays skipped)
+- User (Zelef): 1.96i works (contact lines, the clouds overhead). Next: the lamps and their night light (1.96d bench:
+  6.1 ms at night, 30% of NewLook there).
+- How they ran: PS_Tiles (one pixel per 32 x 32 tile) set a lamp's bit when its light sphere touched the tile's view
+  pyramid (its 4 side planes only): every lamp down the street through a wall's tile, up to 256. PS_Lamps (full size
+  for the user: LampResolution 0) ran LampShade per pixel over all those bits (range, zones, window, BRDF), and the 4
+  strongest got a screen shadow ray of 12 depth reads each (LampVis, LampShadows 1) plus the map's when on.
+- New: PS_Tiles also reads its 32 x 32 depth texels (the sky skipped) for the surfaces' nearest / furthest distance and
+  writes a second set (t81, t82: g_tileRT[2..3]) with only the lamps whose sphere reaches that range (exact: the same
+  sphere as LampShade's per-pixel range test). LampShade uses it with LampTileDepth (258, P23.w, default 1); the glow in
+  the air keeps the frustum set (it lights the air in front of the surfaces). TileCBind binds it wherever t31 is.
+- LampShadowMin (259, P29.w, 0.03): a lamp under 3% of the pixel's lamp light gets no screen shadow ray (at most 3% off).
+  LampVis a [loop] that stops at the first hit or off the screen (was 12 unrolled reads always).
+- fxc: all 35 entries clean, no indexable temps; PS_Lamps 1469 -> 1167 slots, PS_Sun 9150 -> 8848, PS_Tiles 193.
+  Builds. Not yet in game. Backups src/*_v196i.*.bak, NewLook_v196i.hlsl.bak, NewLook_v196i.asi.bak,
+  NewLook_v196i_installed.hlsl.bak. The game was running: NewLook_v196j_pending.*, a wait-and-copy installs them.
+
+- In game (user, night, 2026-10-26): lamps 4.1-4.8 ms on the overlay, bench 5.0 / 5.7 ms at night (was 6.1); the
+  share of NewLook rose (39-41%) only because the rest got cheaper. LampShadowMin 0 vs 0.20: about 2-2.5 FPS.
+
+## 1.96k (2026-10-26): the lamps' glow in the air cut per tile too
+- LampGlow (in PS_Lamps, every pixel) looped over the whole frustum set: every lamp in view, two atans each, car lights
+  loaded and skipped. PS_Tiles now writes a third set (t83, t84: g_tileRT[4..5], 6 targets): no car lights (exact: they
+  have no glow), and no lamp whose sphere starts over its radius past the tile's furthest surface (300 m if the tile
+  has sky): it would add under T / R^2 against pi / h of a lamp in front, not seen. Used with LampTileDepth (1), so 0
+  is the A/B. TileCBind binds t81..t84.
+- fxc: all 35 clean; PS_Tiles 212 slots, PS_Lamps 1172. Builds. Backups src/*_v196j.*.bak, NewLook_v196j.asi.bak,
+  NewLook_v196j_installed.hlsl.bak, NFSLight_ini_before_196k.bak. Game running: NewLook_v196k_pending.*, wait-and-copy.
+
+## 1.96l (2026-10-26): new settings marked in the menu, short labels
+- The user could not find LampTileDepth: its label was a long sentence. Labels of 256-259 shortened ("Clouds faster
+  (0 as before, 2 most)", "No white rims on edges", "Lamps cut per tile by depth (faster)", "Lamp shadows skipped
+  under, share"). New rule: settings added since the last release are in kNewParams (menu.inc) and get a red bullet
+  (cp1251/1252 0x95) in place of the last indent space; the list is emptied at each release. Now: 258, 259.
+- Builds. Backups src/*_v196k.*.bak, NewLook_v196k.asi.bak, NewLook_v196k_installed.hlsl.bak. Game running:
+  NewLook_v196l_pending.*, wait-and-copy.
+- In game (user): the red dot shows. LampTileDepth 1 vs 0: no visible FPS difference (few lamps per pixel there
+  anyway). Shift+B at night: Lamp shadows (screen space) +2.39 ms, Lamp glow under the noise (0.29), LampTileDepth
+  under the noise (0.15), CAR LIGHTS +0.65 (Headlight beams in the air +0.61).
+
+## 1.96m (2026-10-26): lamp shadow rays batched again
+- 1.96j had made LampVis a [loop] with an exit at every step: each depth read waited for the last (1.65 had found the
+  march latency-bound and unrolled it: PS_Lamps 6.6 -> 4.9 ms). Now two batches of 6 unrolled steps, out between them
+  at a hit / off the screen. Same steps, same result.
+- fxc all 35 clean; PS_Lamps 1380 slots, PS_Sun 9057. Builds. Backups src/*_v196l.*.bak, NewLook_v196l.asi.bak,
+  NewLook_v196l_installed.hlsl.bak. Game running: NewLook_v196m_pending.*, wait-and-copy.
+- Next candidates: headlight beams in the air (20 samples a pixel, +0.61 ms).
+- In game (user): 1.96m lamp shadows under the noise (2.11) on Shift+B (was +2.39 ms); lamps 3.08 ms on the overlay.
+
+## 1.96n (2026-10-26): SkyTest, to find where the sky's cost is
+- User: the sky still costs a lot (73 -> 83 FPS on / off) even with a sliver of it on screen. The log's timers: clouds
+  (march + resolve) 0.4-0.6 ms, sky probe 0.2, cloud shadows ~0, the sky draw ~0.01; the bench: SKY off saves 1.6 ms by
+  day / 3.0 at night but the mod's own passes only 0.6 / ~1.7 of it: the rest is outside our timers. (The march already
+  skips cloud pixels the city hides: SK9.x. WetGlossPass runs from the sky but returns: DryGloss 1. The game's
+  reflections tint: ~130 draws a frame.)
+- SkyTest (260, SKY adv list, red dot): 1 no march / resolve, 2 no cloud-shadow map, 3 no sky probe, 4 no tint of the
+  game's reflections, 5 the game's sky shader (none of the pre-draw). A test only.
+- Builds. Backups src/*_v196m.*.bak, NewLook_v196m.asi.bak, NewLook_v196m_installed.hlsl.bak. Wait-and-copy.
+- In game (user, night, the 73 / 83 spot): SKY off 83, on 74; SkyTest 1 (no march) 78, 2 (no cloud-shadow map) 75,
+  3 (no probe) 77, 4 (no tint) 74, 5 (the game's sky shader) 83. So it is all in the pre-draw: march + resolve ~0.7 ms,
+  probe ~0.5 (64^2, its low rays 30 km through the layer at full cost), cloud-shadow map ~0.2, tint 0.
+
+## 1.96o (2026-10-26): the sky cheaper, same look
+- Probe: a face every 4th frame (was every other): it has no camera position, only directions; a full turn in 24 frames.
+- Cloud-shadow map (256^2, 6.4 km): drawn every other frame; g_csOrigin moved only when drawn (readers keep the place
+  it was drawn for).
+- Resolve (cloud resolution, every pixel): the march marks pixels the city hides (a = 1 + 2^-10, exact in half); a
+  resolve pixel whose whole 3x3 march neighbourhood is marked returns at once (no reprojection, no Catmull-Rom); the
+  mark is clamped off (a <= 1) everywhere else.
+- fxc: sky clouds / main / resolve / shadowmap clean. Builds. Backups src/*_v196n.*.bak, NewLook_v196n.asi.bak.
+  SkyTest (260) kept for now (a test; to go before the release). Wait-and-copy.
+- In game (user): no artefacts; the sky a bit cheaper: on / off 76 / 82 (was 74 / 83).
+
+## Grass (started 2026-10-26): the user asked for grass on the big lawns, automatically
+- Found from old picks (NewLook_textures\picked, pick 001/002): the lawn texture a2b6bb46a43d55e5 is a layer of the
+  terrain shader f0aaf6ee2b3884dc: mask t0 (at gMaterialCB[5].yz, normalised) blends Tiling1..3 (t1..t3, uv v2.xy,
+  v2.zw, v3.xy); G-buffer: o0 world normal x 0.5 + 0.5 (w: gloss x wet), o1 sqrt albedo (w: AO map .y), o2 gloss /
+  spec (w 1), o3 sqrt baked light (lightmap x albedo + vertex light + planar reflection) x exposure.
+- Plan: (1) a mask of the lawns: each terrain draw with a grass layer drawn again with our PS (the game's inputs),
+  depth "equal", into an R32G32 target (grass share, depth); (2) before the game's sun draw (the G-buffer done, no
+  lighting yet): a top-down height / colour map around the camera from the mask + depth + the game's view-projection
+  (ViewProjectionModified via the VS's CbShadow, as worldedit's WeCamNote); (3) blade clumps instanced on it, written
+  into the G-buffer (the game, our sun, shadows and lamps light them); (4) LOD / cost.
+
+## 1.97a (2026-10-26): grass stage 1: the lawns found
+- grass.inc: GrassNotePs (the terrain PS by its code hash), GrassAfterDraw (after a terrain draw whose t1..t3 include a
+  grass texture: the mask PS replayed: depth EQUAL, mask target only), GrassBeforeSun (before the game's sun draw:
+  view 38 blends green into the albedo where the mask is; a log line every 900 frames: terrain draws / with grass).
+- Param Grass (261, MATERIALS adv list, red dot); view 38 "grass: the lawns found (green)". Builds; the game was
+  closed: installed. Backups src/*_v196o.*.bak, NewLook_v196o.asi.bak.
+- In game (user): view 38 not in the U list (the list is grouped: menu.inc kViewList). Log: the terrain shader found,
+  the mask shader ready (the signature matched).
+
+## 1.97b: view 38 in the U list (surfaces), the grass log line every 20 s (also with no grass seen)
+- Backups src/*_v197a.*.bak, NewLook_v197a.asi.bak. Game running: NewLook_v197b_pending.asi (the hlsl unchanged).
+- In game (user): view 38 showed nothing; log: 25577 terrain draws, 0 with grass. Two Shift+X picks on a lawn: its
+  shader is d89be45b33ada3f2 (the same terrain shader without the puddle / planar reflection / ambient-spec parts:
+  TEXCOORD0..6 only, Tonemap at t10), mask d915b7a25b36abc8, Tiling1..3 all a2b6bb46a43d55e5.
+
+## 1.97c: terrain shaders found by reflection
+- GrassNotePs: any PS with textures MaskTextureSampler + Tiling1..3TextureSampler and a cbuffer variable
+  maskTilingRatios (slots and offset read); up to 32 variants. GrassMaskFor: each variant's mask PS generated from its
+  input signature (TEXCOORD0.xy the mask's uv; the tiling read from that cbuffer at its offset), checked register for
+  register. Builds; the game was closed: installed. Backups src/*_v197b.*.bak, NewLook_v197b.asi.bak.
+- In game (1.97c log): 32 terrain variants found (the table's size: more there); the mask shaders built and matched
+  (6, 8, 11 inputs); 240 terrain draws, 57 with grass in the first seconds; but the mask was remade several times a
+  frame (512^2, 1024^2, 2560x1440): the terrain is drawn into reflections / maps too.
+
+## 1.97d: the main G-buffer only, 128 terrain variants
+- GrassAfterDraw: only when one of the bound targets is the G-buffer's normal (g_air.normal's resource). Table 128.
+- Builds; the game was closed: installed. Backups src/*_v197c.*.bak, NewLook_v197c.asi.bak.
+- In game (1.97d): the mask is made (~70 grass terrain draws a frame: 96132 in 20 s), 38 variants found, but view 38
+  still showed nothing.
+
+## 1.97e: the view at the main sun draw
+- GrassBeforeSun ran at the frame's first sun draw (a reflection's / map's, before the main G-buffer is done): it set
+  g_grassSunFrame and returned (no mask yet), the main one was skipped. Now: the mask made this frame + MainTarget.
+- Builds. Backups src/*_v197d.*.bak, NewLook_v197d.asi.bak. Game running: NewLook_v197e_pending.asi, wait-and-copy.
+- In game (1.97e): view 38 works: the lawns green, exact to their edges; but some triangles of the lawn show through
+  paving / kerbs drawn over it later (the lawn's mesh goes on under them).
+
+## 1.97f: the mask checked against the final depth
+- View 38: the mask's depth (y) against the game's depth at the sun draw (g_air.depth): another surface drawn over the
+  lawn later -> not grass (relative 2e-5). The same test is for the scatter of stage 2.
+- Builds. Backups src/*_v197e.*.bak, NewLook_v197e.asi.bak. Game running: NewLook_v197f_pending.asi, wait-and-copy.
+- User 2026-10-26: "всё идеально" (view 38 with the final-depth check).
+
+## 1.97g: grass stage 2, the first blades
+- grass.inc: at the main G-buffer's terrain draw (GrassNoteGb), once a frame, keep:
+  - its 4 RTVs and the DSV (held until the sun draw);
+  - its depth test, copied with depth writes on and the stencil off (the lawn's stencil is kept);
+  - ViewProjectionModified from its VS cbuffer (WeCbNow). For this, constant-buffer copies are now on whenever Grass is
+    on (worldedit.inc WeFrame).
+- Before the sun draw, GrassDraw does two passes:
+  - Map: a point for every other screen pixel. Each point is checked against the mask and the final depth, put back
+    into the world (CPU 3x3 inverse of the view rows) and written to a 512² top-down map. The map has 4 targets:
+    A = (height, 1, grass share), then the ground's o1, o3 and o2. GenerateMips fills the holes (value / A.y at the
+    first mip that has data, up to mip 4).
+  - Blades: a world-fixed grid of clumps round the eye, N² instances × 27 vertices (3 blades × 3 triangles), all built
+    in the VS. A clump stands on the map's height and is kept with a probability equal to the grass share. Its albedo,
+    baked light and o2 are the ground's, darker at the root. It has a two-sided normal bent to the up, wind sway, and a
+    height fade over the last 35% of the range. Drawn into the G-buffer and the depth with the game's depth test, so
+    the game's lighting and shadows treat it as the ground.
+- New params (red dot): 262 GrassDist (18 m), 263 GrassDensity (1: 0.16 m spacing), 264 GrassHeight (1).
+- Profiler: PR_GRASS "grass" (also in the bench list).
+- The log line every 20 s now gives the clumps, whether the view was read and whether the G-buffer is known.
+- fxc checks all four entries. Builds. Backups: src/*_v197f.*.bak, NewLook_v197f.asi.bak. Installed at 03:12 (game closed).
+- User (1.97g screenshots): the blades work. Three problems:
+  - "растёт немного криво": the grass runs past the lawn onto the kerbs and paving by up to ~1 m.
+  - "дальность слишком низкая": the far part of a lawn is bare. The 18 m range is measured from the camera, which
+    is high up. At 40 m with density 3 the grid hit its 600 cap, and the range was cut to ~28 m without saying so.
+  - "отражения поверх травы": reflections show on the blades.
+
+## 1.97h: the blades' feet checked on the screen, rings, matte blades
+- Spill: the map's coarse mips (hole filling) spread the lawn a metre past its kerbs. Each blade's foot is now
+  projected to the screen:
+  - If the surface seen there is the foot's own (depth within 0.2 m + 1.5%), it must be lawn there (mask plus the
+    final-depth check), otherwise the blade is dropped.
+  - If the foot is hidden or off the screen, only map mips 0-1 are trusted.
+  - The blade VS now also reads the mask (t4) and the depth (t5).
+- Range: rings.
+  - Ring 0 reaches 10 m at full density. Each next ring reaches twice as far with clumps twice as far apart, the same
+    N² instances each (N capped at 400), and blades 1.6× wider per ring.
+  - Neighbouring rings hand over by a complementary dither across the last fifth of the inner ring. Each ring has
+    its own hashes.
+  - The last 25% of the range shrinks the blades.
+  - GrassDist: default 30, maximum 100, step 5. The map spans 2(R+1).
+- Reflections: the blades' o2 (specular colour) is the ground's × 0.15, and o0.w stays 0. Not yet confirmed that
+  this is the cause.
+- Random lean: 0.9 → 0.5, capped at 0.8.
+- The "mod GPU" sum now includes PR_GRASS.
+- fxc checks; the build passes. Backups: src/*_v197g.*.bak, NewLook_v197g.asi.bak. Installed at 03:20 (game closed).
+- User (1.97h): "уже лучше". Still:
+  - too few blades, and it thins out strongly with distance;
+  - it does not sit well in the world: the roots are dark and the shine is too strong;
+  - it still turns up outside lawns in places.
+- Log: PR_GRASS 0.57-0.89 ms at 142k clumps (40 m, density 3, 3 rings).
+
+## 1.97i: blades matte, more blades, lighter roots
+- The shine: the lighting reads o0.w as the gloss code, with power = 2^(11(1 - w)), so 1 is rough and 0 is a mirror.
+  The blades wrote 0. Now:
+  - the scatter reads o0 too (GrassGbSrv(0), t5);
+  - map A.w holds the ground's o0.w;
+  - the blades write that value, averaged like the other channels.
+- More blades: 5 per clump in ring 0 (3 triangles each). Further rings have 8, 12 and 16 blades of one triangle each.
+  New cbuffer row LB = (blades, vertices per blade); the ring hashes move to l×128.
+- Roots: the albedo now goes 0.88→1.08 from root to tip, AO 0.75→1, baked light 0.85→1 (were 0.72/0.4/0.55).
+- Outside the lawns: a hidden or off-screen foot is now kept only on map mip 0.
+- fxc checks; the build passes. Backups: *_v197h. Installed at 03:26.
+- User (1.97i): "стало лучше". Two problems left:
+  - the lighting on the blades shimmers badly when the camera moves ("как дискотека");
+  - more density wanted.
+
+## 1.97j: steady blades, denser
+- Shimmer, two causes fixed:
+  1. The blade normal was flipped toward the camera, so it flipped as the camera moved. Each blade's side is now
+     fixed by a hash, and the normal is face × 0.4 + up.
+  2. The colours came from one map texel, which holds whichever screen pixel was written there last, a different one
+     each frame. Albedo, baked light, o2 and gloss now come from mip 2-4, about half a metre around, divided by that
+     level's A.y.
+- Density:
+  - 7 blades per clump near; then 12, 18 and 24 one-triangle blades in the further rings;
+  - blades 1.2-2.4 cm wide;
+  - GrassDensity default 1.5, maximum 6.
+  - Hash stride: 7 per blade, 256 per ring.
+- Builds. Backups: *_v197i. The game was running: staged as NewLook_v197j_pending.asi, with a wait-and-copy loop.
+- 1.97j installed at 03:32 by the wait-and-copy loop.
+- User (1.97j): lighting "куда лучше", but it switches in squares. Also: no puddles on grass and soil at all ("впитывается").
+
+## 1.97k: filtered ground colours; lawns soak the rain up
+- Squares: the colours were Loaded from one mip-2..4 texel, so 0.5-2.5 m squares showed, and they changed as the map's
+  corner moved by one texel each frame. Now:
+  - a linear-filtered SampleLevel at the clamped level (sampler g_grassSmp at VS s0, saved and restored);
+  - the map's corner moves in 16-texel steps.
+- Puddles off on lawns:
+  - The mask's x is now at least 0.004 on every pixel of a lawn's draw (its soil too); the grass share still uses
+    the 0.02 threshold.
+  - The blades write the mask as a fifth target, x = 1 and y = their depth, so a blade pixel passes the final-depth
+    test. Their feet check reads g_grassMaskB, a copy made just before.
+  - The mask is bound at t85 (GrassSoftBind) at the sun draw and in WetGlossPass.
+  - NewLook.hlsl: SoftGroundPx / SoftGround (mask x > 0.002 and its depth = this pixel's) zero wet and puddle in
+    GlossFix, PS_SSRApply, SsrRay and debug view 27.
+  - Grass off: the mask is not made, so puddles are as before.
+- fxc: all 35 NewLook entries and the blade VS/PS compile. Builds. Backups: *_v197j (plus NewLook.hlsl and
+  gamewet.inc). Installed asi + hlsl at 03:42.
+- User (1.97k): puddles are still drawn on the lawns. Grass and the car overlap a little oddly (bare spots behind it,
+  something at the roof edge). Wanted: more variety (taller and shorter patches); ideally the grass parts or is pressed
+  down by the car.
+
+## 1.97l: t85 bound for the reflections, patches, the car presses the grass
+- Puddles: the SSR passes (PS_SSR / SsrRay and PS_SSRApply, newlook.cpp) did not have t85 bound. GrassSoftBind is now
+  called right before both Replays (forward-declared in newlook.cpp).
+- Holes behind the car: a foot hidden by something more than 0.5 m nearer (a car, a post) may use map mips up to 2.
+  Off-screen feet: mip 0 only, as before.
+- Variety: smooth value noise VN over the foot's xz, 4.5 m (65%) plus 1.4 m (35%), smoothstepped, scales the height
+  0.45-1.65×. 4% of clumps are tall tufts (×1.7).
+- The car: cbuffer rows CR0 (the place, on) and CR1 (side and forward axes, flat, unit) from g_playerMat (rain.inc).
+  - The forward axis (row 0 or 2) is learnt from the car's motion: whichever axis it moves along at least 1.5× more,
+    logged when it changes. Until then row 2.
+  - A 2.1 × 4.6 m box with a signed distance: within 0.7 m of it the lean turns away from it (×1.3, k²). Under it the
+    blades are pressed down to 25% height. Only within ±2.5 m in height.
+- fxc checks; the build passes. Backups: *_v197k. Installed at 03:49.
+- User (1.97l):
+  - "трава будто бы прозрачная": the car shows through blades drawn in front of it (dark silhouette, its exhausts);
+  - puddles are still on the lawns (night rain);
+  - grass grows round the car on paving where there is no lawn (view 38 shows the blades there).
+
+## 1.97m: the blades write the lawn's stencil; lawns matte in the rain; the map knows non-lawn ground
+- Show-through: the blades did not write the stencil. Car pixels they covered kept the car's stencil, and a car pass
+  of the game's (by the stencil) drew the car over them. Now:
+  - g_grassDsDraw writes the terrain draw's stencil ref (REPLACE, ALWAYS, front and back);
+  - the terrain DS's stencil setup is logged once ("grass: the terrain's stencil: ...").
+- Puddles and shine: in the rain the game's own wet gloss stayed on the lawns, and the blades copy the ground's o0.w.
+  GlossFix now returns (0, 0.9) on soft ground, so the gloss code is 0.9 (rough) before the scatter reads it.
+- Grass on paving behind the car: the map could not tell paving from ground it had not seen. Now:
+  - The scatter also writes other visible up-facing ground (normal y > 0.7) as "seen, not lawn".
+  - A = (height·lawn, seen, lawn, gloss·lawn); D.w = the grass share; the lawn's values are divided by A.z.
+  - The blades use the first level with anything seen. They are dropped where no lawn is there. A blade whose foot is
+    not seen and that uses a coarse level needs lawn on at least 75% of the ground seen there.
+  - Blade o2.w = 1.
+- fxc checks (map, blades, WetGloss); the build passes. Backups: *_v197l (+ hlsl). Installed asi + hlsl at 04:02.
+- User (1.97m): "всё осталось также". The main thing: puddles off on the lawns we draw grass on.
+- Log: the terrain's stencil is on (ALWAYS, REPLACE, ref 144), so the blades now write 144. The "wet shader" lines
+  show the terrain shaders (Mask/Tiling samplers) are the game's own wet shaders.
+
+## 1.97n: the game's own puddles off on lawn draws
+- The puddles on the lawns were the game's own. Its terrain shaders read puddleMapSampler (gamewet.inc PuddleNote):
+  the map darkens, flattens, glosses and mixes in the planar reflection. NewLook's wetness exclusions never applied.
+- gamewet.inc GameWetBefore: a lawn's draw (GrassDryDraw in grass.inc: a TerrPs shader with a grass texture bound in
+  one of its layers, Grass on) gets g_puddleDry (alpha 0) for its puddle map, whatever GameWetness is. The map is put
+  back after the draw as before.
+- Builds. Backups: *_v197m. Installed at 04:08.
+- Still open: the car showing through the blades (1.97m's stencil did not fix it, per the user). Cause unknown.
+
+## 1.97o: lawns found by the world map too; diagnostics in view 31
+- 1.97n did not help: the user's view 31 still showed NewLook's own puddles (small mirrors and big matte) on the lawns.
+  Those come from Wetness in PS_SSR / PS_SSRApply. The screen test (SoftGround: the t85 mask plus a depth match) did
+  not catch them. The cause is not known yet: either the mask was not bound or the depths did not match.
+- A second test that does not depend on depth: SoftGroundW(world) reads the grass map A (g_gm[0], t86) from above.
+  - Its place is in a one-element buffer at t87: corner x, z, 1/extent, on. GrassDraw writes it after GenerateMips
+    (g_grassMapFrame).
+  - It samples level 2 bilinearly with Loads. The lawn share z/y goes through smoothstep 0.45..0.7.
+  - The height gate is -0.5..+1.3 m over the map's ground height (a.x/a.z), which takes in the blades.
+  - Used in SsrRay, PS_SSRApply and GlossFix as max(screen test, map test).
+- GrassSoftBind binds t85..t87 when Grass is on and the mask or map is from this frame or the last one. It used to need
+  this frame exactly.
+- Diagnostics:
+  - Every 20 s the log has the line "the rain's lawns bound N times: X with no mask, Y with no map".
+  - In view 31 (wetness and puddles), lawns show green where the screen test finds them, red where the map test does,
+    and yellow where both do.
+- Builds; all 35 shader entries compile with fxc. Backups: *_v197n, NewLook_v197n_installed.hlsl.bak. Installed at 04:25.
+
+## 1.97p: the lawn screen test fixed; the grass map kept over frames; smooth ring handover
+- 1.97o's view 31 showed red only (the map test), never green. The log showed the mask bound every time, so the screen
+  test's depth match was what failed. SoftGround compared the mask at int(uv*size) with the depth sampled at uv, which
+  could be the next pixel. On ground seen at a slant the depth differs from pixel to pixel. It now Loads the depth at
+  that same pixel.
+- PS_SSRApply: vis *= 1 - lawn, so lawns and blades reflect nothing. The user saw a puddle "through the grass": the
+  half-size reflections of a puddle next to the lawn spilt onto the blades.
+- The grass map is kept over frames (blades jumping; their light switching in soft squares as the camera moved). Each
+  frame's map used to hold only what the screen showed that frame.
+  - The scatter now writes g_gmC (no mips).
+  - psKeep (vsFull, a full-screen triangle) writes g_gm = g_gmC + g_gmP*0.8, with g_gm and g_gmP swapped each frame.
+  - The previous map is read moved by the corner's texel offset (LB.zw, cb[54..55]). It is reset (1e5) after a gap of
+    more than 1 frame or when the extent changes.
+  - The PS b0 constant buffer is now saved and restored around GrassDraw.
+- Ring handover: clumps grow in and shrink out over 0.3 of the band around their own random distance. They used to
+  pop on and off by a dither. The grass share test is soft too: shK = saturate((share - h)*8) scales the height.
+- The blades' foot check read g_air.depth while the same texture might be bound as the DSV the blades write. D3D drops
+  such an SRV, so the check read 0 and "seen" was never true. GrassFeetDepth copies the depth (CopyResource into an
+  SRV-only texture of the same format) when the resources are the same. It logs once which case applies.
+- Builds; the grass shaders and all 35 NewLook entries compile with fxc. Backups: *_v197o. Installed at 04:39.
+
+## 1.98a: sharp reflections' detail rebuilt at full size (the optimisation, step 1)
+- Why: below 100 % reflection resolution the reflections were mush. The reduced target held colours, and they were
+  stretched to the screen (a depth-aware 4x4 upsample in PS_SSRApply). What a puddle or the paint mirrors lost its
+  detail for good.
+- Approach (as Frostbite's SSR: trace reduced, resolve full): keep where each ray hit and stretch those places, not the
+  colours. On a flat mirror the places move smoothly from pixel to pixel; the colour is read from the full-size frame.
+  - PS_SSR has a third target, g_ssrHit (R32G32B32A32F, reduced size): the hit uv, the start distance, and
+    floor(mip*64) + conf*0.99. w = -1 means no sharp hit: blurred (mip >= 1), sky, or past a car's underside.
+  - PS_SSRSharp (new, full size, before the apply) writes g_ssrDet (R16G16B16A16F, signed):
+    - it takes the 4 nearest hits on the same surface (bilinear x same-distance weight) and blends their uv;
+    - it reads the frame there (tScene, lerped to tRefl by mip) and subtracts the 4 hits' own reads: the detail the
+      reduced target missed;
+    - none when a same-surface neighbour has no sharp hit, or when the hits lie more than 4..6 reduced texels apart (an
+      edge in the mirrored picture). New bright spots are clamped to 3x the neighbours' brightest.
+  - PS_SSRApply: r += tSsrDet at its pixel (unbound: 0), so with it off it is exactly 1.97p.
+- The setting ReflectionSharp (265, "Sharp detail at full size", default on) is in REFLECTIONS (simple and advanced)
+  and has the red dot. It acts only when the reflection resolution is under 100 %.
+- Not yet: the per-frame rotating sample position inside a reduced texel (temporal super-resolution). That comes next
+  if needed.
+- Builds; all 36 NewLook entries compile with fxc (PS_SSRSharp's early return inside the unrolled loop failed
+  validation: replaced by a flag). Backups: *_v197p. The game was running: staged NewLook_v198a_pending.*, with a
+  background copy when the game closes. Installed at 12:53.
+- User test (1.98a, night rain, 5120x1440): at 50 % with the detail on, FPS 46.9, mod GPU 13.24 ms; at 100 % without
+  it, FPS 44.3, 13.59 ms. Only ~0.35 ms apart, and the detail flickers.
+  - Why so little: the ray pass was 1.42 ms at 70 % (timing log), so the reflections' resolution is a small lever.
+    The mod's cost is spread over full-size passes: sun ~2.4, grass ~2.4, air ~2.6 (with snap and reflections),
+    half-res AO / bounce ~1.6, and the lamps at night.
+  - ReflectionSharp default set to 0 (source only, with the next build). Its flicker comes from the jittered hits; a
+    fix would need the temporal rotation. Shelved (TODO).
+
+## 1.98b: the pass profile (Ctrl+Shift+B), Grass off by default, cheaper clouds at night (the optimisation, step 1)
+- Why: the user plays at 5120x1440 (RTX 3080) at about 40 FPS. The goal is NewLook's whole cost down by 40-50 %. The
+  quick bench's per-section figures wobble by 2-3 ms, so they cannot pick the targets. The timestamps can.
+- The pass profile (bench.inc, Pp*): Ctrl+Shift+B, about 3 min, hands off; B stops it.
+  - Scenes: day and night (the game's clock set as the quick bench sets it, our sun path held), else "now".
+  - Windows: a reference (everything as set), the mod off, then each setting that is on switched off in turn, with a
+    reference after each. Settle 0.5 s (1.5 s after the lamps, 1 s after the mod back on), then 1 s measured.
+    - Per pass: the mean of its timestamps.
+    - The GPU frame span (the menu's overlay taken out): the median.
+    - The CPU's wait in Present: GPU-bound or not (* in the report).
+  - Settings (kPpFx): sun shadows, soft sun, contact, AO, sky occlusion, bounce, haze, shafts, sun glow, reflections,
+    wet ground, car paint, puddles, our sky, grading, relief, both parallaxes, the lighting model, grass. At night also
+    headlight beams, traffic lights, the lamps' glow, lamps on every post, their screen-space shadows, their shadow
+    maps, the lamps (the dearest last).
+  - A setting held off stays off after the weather (PpHold after SecEnforce: the weather drives the haze, the puddles,
+    the wet ground).
+  - Its cost: the references round it minus its window. When the reference after differs from the one before by over
+    max(0.3 ms, 8 %) (caches refilling), the one before alone is used. Reported in our passes (with the five parts that
+    change most) and in the whole frame (which also holds the costs inside the game's own draws).
+  - Report: scripts\NewLook_profile.txt. Per scene: the frame, the game alone, NewLook's cost split into its own
+    passes and the rest; our passes with no overlaps, most first, with % of the frame; the game's two timed passes
+    (its sun light, the shadow maps) with the mod on and off; each setting's saving; every window's raw figures. The
+    log gets "pass profile:" lines.
+- New profiler slots: PR_TILES (in half-res: the camera record, the lamps' fix and tiles), PR_AO (in half-res: PS_Half
+  with the AO blur), PR_APPLY (in air: the reflections onto the frame), PR_AIRPS (in air: PS_Air itself), PR_WETGLOSS
+  (the two full-screen wet gloss passes before the game's lighting; untimed until now).
+- ModPassMs (kModPass) sums the mod's passes once each, for the overlay, the quick bench and the profile. The quick bench
+  had counted the sun shadow mask twice (it sits inside half-res), so its "mod passes" were inflated by the mask. The
+  overlay now also counts the wet gloss.
+- Grass (261) is off by default (the user: costly, made on a whim; put aside). The user's ini already had Grass=0.
+- ReflectionSharp (265) is off by default (decided after the 1.98a test; built now).
+- Clouds at night (the user: once it is dark the clouds hardly show):
+  - SkyFill: the quality (SK4.w) scaled by 1 - night; the faster march (SK12.y) at least 1 past half of the night and
+    2 past 85 % (the user has SkyFast 2 already). The probe is unchanged.
+  - The march: no "look up" sample for the sky's light at night (SK9.y >= 0.8; ambV held at 0.8). That is one density
+    fetch less per step inside a cloud.
+  - The cloud shadow map is drawn every 4th frame past 70 % night (was every other frame).
+- Noticed while placing the marks: the game's own sun light draw (PR_GAMESUN) still runs in full, and our sun pass
+  draws after it. To check in the profile: if ours covers it everywhere, it could be skipped.
+- Checks: the sky's 4 entries compile with fxc (ps_4_0); NewLook.hlsl unchanged. Builds. Backups: *_v198a. The game was
+  closed: installed at 13:27 (asi only).
+- User's profile (1.98b, 2026-10-26 13:39; screen 2560x1440 this time, RTX 3080, WEATHER off, ReflectionScale 100,
+  LampResolution full, LampShadowMaps off):
+  - Day: the frame 12.5 ms; the game alone 5.0 (not GPU-bound); NewLook ~7.5, of it 6.55 in its passes. Sun 1.48,
+    half-res pass 1.33, reflections' rays 1.27, sun shadow mask 0.60, reflections onto the frame 0.43, the air 0.43,
+    grading 0.38, clouds 0.25, snapshot 0.24.
+  - Night: the frame 16.4; NewLook ~11.2, of it 10.1 in its passes. Lamps 2.97, sun 1.62, rays 1.28, half-res pass
+    1.09, mask 0.65, camera record + tiles 0.52, snapshot 0.51, apply 0.45, air 0.44, grading 0.34, clouds 0.15.
+  - The clouds are small (0.25 by day, 0.15 at night after 1.98b). The quick bench's 4.3 ms for SKY at night was noise.
+  - The per-setting figures do not hold: the same "everything as set" moved between 5.9 and 8.1 ms in our passes from
+    one window to the next (+-1.1 by day, +-1.5 at night), mostly in the sun pass, while settings change it by tenths.
+    Many showed "off costs more" by 1-2 ms in the sun pass (AO, sky occlusion, bounce, wet ground). Cause not known
+    (the view, the clocks, transients after a setting comes back).
+  - Robust: reflections ~2 ms all told (rays 1.23 + apply 0.42 + some of the sun pass), the lamps ~3.5 at night (their
+    pass 3.4 + tiles 0.5), the mask 0.6 (our maps), grading 0.38, the haze's share of the air 0.3, the lamps' glow 0.33.
+
+## 1.98c: the pass profile as A / B in alternating blocks of frames
+- Why: 1.98b's windows of a second, one after another, were swamped by the drift (above).
+- Each setting (and the mod) is switched off and on every 8 frames. The first 3 of each block are left out (histories,
+  caches); it runs until each side has 60 frames (or 6 s), then waits 7 frames for the last figures.
+- Every profiled frame carries its state: ProfFrame::tag, set from g_pfTag when the frame's queries open (after
+  Present; PpTick sets it before). It is read back with the frame 5 later (g_pfTagRead, seen by BenchSample).
+- Per side: each pass's mean, the frame span's median; the uncertainty of "as set minus off" from the frames' spread
+  (standard error) for our passes and for the frame.
+- The breakdown "everything as set" now pools all the as-set frames of the scene: each part's mean, its spread from
+  frame to frame (sd) and its most in one frame (to see spikes).
+- The report and the log lines changed to match. It flickers while it runs (settings flip every 8 frames).
+- Builds. Backups: *_v198b. The game was running: staged NewLook_v198c_pending.asi with a background copy when it
+  closes.
+- Installed at 13:51 (the game closed).
+- User's profile (1.98c, 14:00; 2560x1440, the camera held still by DroneCam's free camera; the menu open):
+  the uncertainties are now +-0.1..0.2 ms.
+  - Day: NewLook 7.18 +-0.17 ms (the game alone 5.27), 6.83 of it in its passes. Settings: reflections 1.85 (rays 1.22,
+    apply 0.43), relief 1.12 (all in the sun pass), bounce 0.75, sky occlusion 0.45 (half-res pass), our sky 0.40 in
+    our passes / 0.70 in the frame, grading 0.38. Our maps: the mask +0.57, the sun pass -0.56 (they replace its own
+    filter). AO, haze, shafts, glow, soft sun, puddles, wet ground, car paint, parallax, the lighting model: each ~0.
+  - Night: NewLook 11.38 +-0.25 (the game alone 5.49). The lamps 5.22 (their pass 4.02 at full size, of it the
+    screen-space shadows 1.22; tiles 0.51; their glow in the air 0.32), reflections 1.77 (frame 2.52), bounce 0.79,
+    relief 0.60, grading 0.45, sky occlusion 0.39, AO 0.29, the lamps' glow 0.25. Our sky: -0.04 in our passes but
+    +1.20 +-0.14 in the frame: something it drives outside our timed passes (to find: 1.98d's sky items).
+  - The sun pass varies from frame to frame (sd 0.8, up to 4.3 ms; mean 1.5). Every pass has rare frames 2-5x its mean.
+  - The user's LampResolution is 0 (full); its default is 1 (half: the strongest lamp's highlight redrawn at full size
+    in the sun pass, the rest upsampled by distance). Half would save most of the lamps' 4 ms. Asked why full.
+
+## 1.98d: Relief's sun march only where the sun is; the profile: the sky's parts, the lamps' resolution, frame states
+- Relief (PS_Sun, 1.12 ms by day, 0.60 at night): its 12-step march towards the sun (24 reads a pixel) now only where
+  its result shows: ndlN > 0, gNew > 0.004 (not in the sun's shadow), sw > 0.002 (our sun up). relief.x multiplies
+  contact, which acts only through sunNew (x gNew x sw) and shadowAmt (x gNew, ndlN, sw); so the picture is unchanged.
+  Its sky part (4 x 5 steps) stays.
+- The pass profile:
+  - PpFx has alt / useAlt (an item against another value, not the setting's off) and slow (blocks of 90 frames, 30 left
+    out, on / off / on / off: for a switch that remakes targets).
+  - New items: the sky's parts via SkyTest (1 no cloud march, 2 no cloud shadow map, 3 no probe, 4 the game's
+    reflections untinted, 5 the game's sky shader), our night off, no stars, no cloud shadows on the ground. At night:
+    the lamps at the other resolution (slow: EnsureLampLT remakes its 3 targets at a size change, and a failed make
+    turns the lamps off for good, so not every 8 frames).
+  - ProfFrame::flags: the frame's states (1 the sun shadow mask missing, 2 no half-res pass, 4 the lamp tiles not
+    ready), set where the sun pass's constants are written, read back with the frame (g_pfFlagsRead). The report lists
+    the as-set frames by state with their sun pass, our passes and frame: is a missing mask behind the sun pass's dear
+    frames.
+- fxc: all 36 entries clean (fxall.sh in the scratchpad). Builds. Backups *_v198c (+ NewLook_v198c_installed.hlsl.bak).
+  The game was running: staged NewLook_v198d_pending.asi / .hlsl with a background copy when it closes.
+- User (14:16, still 1.98c: the game had not been closed, so 1.98d was not in): LampResolution full because half lost
+  too much: next to a wall lamp, the fixture and window frames in 2x2 blocks and noise. In the menu: half 70 FPS /
+  13.4 ms, full 61 FPS / 17.2 ms. Cause: the near lamp's screen shadow (its noise) and its light on small shapes made at
+  half size, then stretched by distance alone (no normals).
+
+## 1.98e: lamps at half size, split: the pixel's strongest lamp whole at full size; a fix for the sun mask's flag
+- LampResolution 1 (half) now splits:
+  - PS_Lamps (half) leaves out the texel's strongest lamp's whole light (LampShade's gBestC x its shadow), not only its
+    highlight. t42 holds (index + 1, zone factor (< 0: it had the screen shadow ray), its shadow, distance).
+  - PS_Sun (full) computes that lamp per pixel: LampOne (was LampSpecOne: now the diffuse too, or the highlight alone)
+    x zone factor x its shadow at full size (LampVis if the half pass cast one, the soft map shadow with the maps on).
+  - The rest: LampRestAt, from the 4 nearest half texels with the same strongest lamp as the best of them; weights:
+    bilinear x on this pixel's plane (each texel's point from its ray and distance) x a like normal (the G-buffer's,
+    read where the lamp pass read it).
+  - None of the 4 on this surface (conf < 0.05: thin things, 1 px wide): the full LampShade for that pixel. PS_Sun
+    keeps one LampShade call (also the no-lamp-pass case) and one LampOne call (the full-size mode's highlight too).
+  - The snapshot (bounce source) also takes the strongest lamp's diffuse out (x its half-size shadow from t42.z);
+    t42 is bound there now.
+  - LampResolution 0 (full) is as before.
+- Fix: PS_Sun read "our sun mask bound" from P10.z, but the lamps write their target's width there (P10.zw) whenever
+  they are on: in a frame without the mask it read an unbound t58 (0: everything in sun shadow). The flag is P14.w now.
+- fxc: all 36 entries clean. Builds. PS_Sun 9902 asm lines (ps_5_0). Backups *_v198d (NewLook_v198d.asi.bak from the
+  1.98d pending copy). The game was running: stopped the 1.98d copy task, staged NewLook_v198e_pending.asi / .hlsl
+  with a new background copy when it closes.
+- Not measured yet. To check: LampResolution half against full at the same lamp (the fixture, window frames, the
+  shadow's grain), and the pass profile (lamps: the other resolution).
+- 1.98e installed 14:37 (the game closed).
+- User (1.98e, 14:47; the street of the lamp screenshots, 2560x1440): half 68-69 FPS against full 60-61, "the quality
+  hardly drops, seen only on small details: a good optimisation". The pass profile:
+  - Day: NewLook 6.47 +-0.21 ms (the game 5.69). Reflections 1.72, bounce 1.14 (of it 0.81 in the sun pass!), relief
+    0.58 (the sun pass), our maps 0.48, grading 0.46, sky occlusion 0.31 (0.55 in its pass), clouds' march 0.28; the
+    game's sky shader replaced by ours: +0.79 in the frame (0.28 in our passes).
+  - Night: NewLook 10.23 +-0.25 (1.98c full: 11.38). Lamps 3.37 (their pass 0.90, the sun pass +1.38, tiles 0.49, the
+    air's glow 0.34, the snapshot 0.27); at full res 2.50 more. Relief 1.44 (!, the sun pass; 0.60 in 1.98c), reflections
+    1.67, bounce 1.14 (0.81 in the sun pass again), the lamps' screen shadows 0.53 (0.22 of it at full size), grading
+    0.39, our maps 0.39 (+0.90 in the frame), stars 0.28. Our sky in the game's sky draw: +1.0 in the frame.
+  - Every as-set frame "normal" (the mask, the half-res pass, the tiles there): the sun pass's spread (sd 0.85, up to
+    9 ms) is not those states.
+
+## 1.98f: the lamp tiles' depth range in blocks; tests for the profile (relief's parts, the split's parts, bounce)
+- PS_Tiles read all 1024 depths of its 32 x 32 tile in one thread, one after another (80 x 45 threads at 1440p): the
+  reads' latency. Now PS_TileZ first: one pixel per 8 x 8 block (64 reads unrolled, many pixels): nearest, furthest
+  distance, sky in; RGBA32F at the tiles' size x 4 (t90). PS_Tiles reads its 4 x 4 of them. The same distances
+  (the same rays: t00 + Xf * px), so the cut is as exact as before.
+- PS_Tiles' lamp loop: 8 lamps at a time, their 16 reads first (each read waited for the last).
+- Fix: with LampTileDepth off, dmax stayed 0 and the glow's tiles (gEnd = min(dmax, 300)) dropped every lamp past 2 radii.
+- PerfTest (param 266, cb P34.x, PerfT() in the shader; out before a release, as SkyTest): 1 relief's sky part off,
+  2 its sun part off, 3 the split without its full-size fallback, 4 the split's rest by distance alone (LampTexAt),
+  5 no strongest lamp at full size, 6 no tGI fetch in the sun pass. Profile items for each (3..5 at night).
+- Shaders 37 (PS_TileZ). Backups *_v198e (+ NewLook_v198e_installed.hlsl.bak).
+- fxc: all 37 entries clean. Builds. Installed 14:58 (the game closed).
+- User's profile (1.98f, 15:07, the same street):
+  - Night: NewLook 9.31 +-0.20 ms (1.98e 10.23). Tiles 0.12 (0.52 before: PS_TileZ). Relief 1.18, of it the sky part
+    1.26 (!) and the sun part 0.50 (the moon). The split's strongest lamp at full size 0.55, its plane / normal-aware
+    upsample 0.27, its fallback 0.14 +-0.17 (not seen). Lamps' screen shadows 0.78 (0.52 at full size). Bounce fetch
+    in the sun pass 0.12 +-0.12: 1.98e's 0.81 was not it.
+  - Day: NewLook 6.58 +-0.15. Reflections 1.69, relief's sky part 0.84 (sun part 0.14), sky occlusion 0.70.
+  - Our sky: +0.97 (day) / +1.17 (night) in the frame, 0.28 / 0.17 of it in our passes; SkyTest 5 (the game's sky
+    shader) +0.64 / +0.75 in the frame, SkyTest 1 (no march) +0.76 / +0.90. Our timed sky draw is 0.01: the cost is
+    elsewhere (other draws with our sky shader? the cloud pass run more than once a frame, targets remade?).
+  - Its log: the CPU's frame 15.6 ms, "ours round the game's draws" 4-5 ms, the game's own 1.8, Present waits 6-7
+    (GPU-bound); "resources made" 0.17 ms every frame.
+- User: the traffic takes 10-20 FPS from 80 (it is off for the benchmarks); to find out what of it costs.
+
+## 1.98g: relief's reads together; our CPU's parts in the log; our sky shader's binds and draws counted
+- Relief (PS_Sun): both marches read one step at a time, the normal after the depth's test (RelNormal: [loop] with
+  breaks): each read waited for the last. Now RelNormalR (ProjSetup / ProjAt: a ray set up once) reads depth and normal
+  together; the sun's 12 steps in 2 batches of 6, the sky's 4 directions in a loop, each direction's 5 steps together.
+  The same results (the breaks as an "alive" flag, as LampVis since 1.96m).
+- hitch.inc: HsScope parts of "ours round them", logged every 10 s as "cpu, ours: ...": our passes at the game's sun
+  draw, the sky (SkyBeforeDraw), our sun-shadow casters (SsAfterDraw), lamp shadow maps (LsAfterDraw), car lights
+  (CarAfterDraw), rain, grade; the game's draws a frame; our sky shader's binds, its draws, the cloud passes a frame and
+  the cloud targets remade. For the traffic: the same lines with it on and off.
+- SkyTest 6 (and a profile item): our sky shader on the frame's first sky bind only (the other binds get the game's).
+- Backups *_v198f (+ hitch_v198f.inc.bak, sky_v198f.inc.bak, NewLook_v198f_installed.hlsl.bak).
+- fxc: all 37 entries clean (PS_Sun 10141 asm lines, ps_5_0; 9902 at 1.98e). Builds. Installed 15:17 (the game closed).
+- User's profile (1.98g, 15:23, the same street): night ~8.3 ms (as set minus the game alone; 1.98e ~9.9), day ~6.2.
+  Relief at night 0.46 (1.18 at 1.98f; its sky part 0.12 from 1.26). "Ours on the first sky draw only" (SkyTest 6):
+  -0.41 ms by day, -0.58 at night in the frame.
+- Its log (1.98g's "cpu," line): our sky shader bound 3 times a frame (8 draws), the cloud passes 3 a frame, the cloud
+  targets made ~2500 / 10 s = each bind (the views' sizes differ): the main view's clouds never had a last frame to blend.
+  Our sun-shadow casters (SsAfterDraw) 1.7-2.4 ms of CPU a frame, the most of ours; the frame GPU-bound (Present waits).
+- Traffic (the user's DroneCam F3, by day): off 15:34:00-15:35:10 FPS 83-85, GPU frame 11.2-11.6 ms, mod GPU 5.6-5.9,
+  the game's draws ~8150-8210; on 15:36:10-15:37:00 FPS 75-78, GPU frame 12.2-12.8, mod GPU 5.4-5.7, draws ~8720-8980.
+  +1.1-1.3 ms on the GPU, none of it in our timed passes; our CPU parts the same (casters 1.7). By day (lamps 0.00): the
+  headlights as lamps not in it.
+
+## 1.98h: the sky's views apart; the frame map
+- sky.inc: CloudSet: a set of cloud targets (pictures, march, viewProjection) per view: [0] the main one (the first sky
+  draw a frame of the game's picture's size, g_rtW x g_rtH; none of that size last frame: each as the main one, as
+  before, logged), [1] [2] the others' (found by size, else the longest unused). Nothing made anew each bind; the main
+  view's clouds blend with its last frame (they never did: the targets were made anew at each of the 3 binds).
+- SkyViews (267, sky section; red dot): the sky in the game's other views (its reflections): 0 the game's sky shader
+  (put back at the draw), 1 ours without our clouds (no cloud pass), 2 (default) ours with clouds at the lowest
+  quality, no history, no depth test (the bound depth is the main view's: holes before), no cloud-shadow map, probe or
+  wet gloss there (all three ran at each bind: the probe drew 3 faces every 4th frame from the views' constants, the wet
+  gloss wrote the main normal buffer at the other views' sizes). PR_CLOUDS / PR_SKYDRAW: the main view's.
+- SkyTest 6 out (SkyViews 0 does it); the profile's items: "sky in the game's reflections: its own / no clouds of ours".
+- The log: "sky: the game's views a frame (its sky draws): WxH (the main one), ..." every 30 s.
+- Frame map (newlook.cpp FmMark / FmRead / FmText): GPU timestamps and the game's draws at marks: each view's sky bind
+  (with its size; our sky off too), the game's sun-shadow pass start / end, its lighting (the sun draw), its final
+  picture, our late pass; the frames alike summed, logged after the "cpu," line every 10 s ("frame map: ... | to view
+  WxH ms, draws | ..."). For the traffic: which part of the game's own frame grows.
+- Backups *_v198g (+ sections_v198g.inc.bak); the hlsl unchanged.
+- Installed 15:53 (the game closed).
+- User's profile (1.98h, 16:18): day as set 12.32 ms, the game alone 5.12 (NewLook 7.20); night 14.79 / 5.93 (8.86).
+  The SkyViews items ~0: no view was "other" (below). "Sky: the game's sky shader" still +0.84 day / +0.61 night in the
+  frame (our passes +0.25 / +0.05).
+- Its log: "sky: the game's views a frame": every view "the main one", the cloud targets still made ~3 a frame. The
+  main view was the one of g_rtW x g_rtH: g_rtW is the size of the last sun-pass draw, the game's reflections' too
+  ("small skipped" in the stats), so none of the sky views matched it, "no view of the picture's size" (logged once,
+  16:06:42) and each was taken as the main one, as before 1.98h.
+- The frame map (1.98h). The game's views: by day one face of a 128x128 cube (the game's sky reflection cube), at night
+  (and while its clock is set) all 6 a frame, 2 draws each; a 1024x1024 view (688 draws of its own); the main view
+  2560x1440. Day, traffic off (16:23:27-16:24:07, GPU 12.0-12.2 ms): before the first sky 0.67 ms / 3886 draws, the cube
+  face 0.23 / 6, the sun shadows 0.41 / ~1710, the 1024 view 0.24 / 688, its rest + the main G-buffer 2.61 / 1290, our
+  sky at the main view 0.36 / 1, from the game's lighting to our late pass 4.25 / 143 (its lighting, our sun pass and
+  half-res, its forward draws), our late pass to its final picture 2.56 / 17, to Present 0.72 / 2.
+- Traffic by day (16:22:27-16:22:57, GPU 13.3-13.4): the main G-buffer +0.97 ms (+575 draws), lighting to the late pass
+  +0.30 (+277), the 1024 view +0.01 (+70), the sun shadows none (fewer draws). At night (off 16:24:17-16:25:07, 14.2-14.3;
+  on 16:25:37-16:25:47, 16.0-16.15): the G-buffer +1.3 (+586), lighting to the late pass +0.4 (+290): ~+1.8 ms.
+
+## 1.98i: the main sky view by the screen's width
+- sky.inc SkyBeforeDraw: the main view is the first a frame of the screen's width (as MainTarget: not 8 px narrower
+  than the back buffer), not of g_rtW x g_rtH. The views' log line: each view "main" / "other", the screen's size, the
+  fallback flagged.
+- Backups *_v198h.
+- Installed 16:32 (the game closed).
+- User (1.98i): the clouds shake, the buildings' edges smear up into them, the rims round things before them grew
+  (the main view's cloud history, first used in 1.98i, is broken).
+- Profiles 1.98i (17:19 with traffic, 17:23 without). Without: day NewLook 7.59 (the game alone 5.50), night 9.42 (6.14).
+  "Sky in the game's reflections: its own" +0.87 / +1.13 ms in the frame, "no clouds of ours" +1.02 / +1.07: the
+  other views' clouds ~1 ms (untimed). "Sky: the game's sky shader" +1.36 / +1.31. With traffic: night NewLook 10.97
+  (1.86 of it in the game's draws, 0.78 without traffic); "traffic car lights" off: +1.31 ms in the frame, ~0 in ours.
+- Frame map, mod off (Y): traffic on 17:13:11-31 GPU 6.2 ms, off 17:13:41-14:01 5.4: the main G-buffer +0.13 ms for
+  +456 draws (with the mod on +0.97 for +575): our per-draw work on the traffic cars. CarAfterDraw (carlights.inc):
+  2 CopySubresourceRegion a traffic car draw (the matrix to the GPU list and to the CPU's staging), by day too.
+
+## 1.98j: the traffic cars' copies cut; the clouds' history off; SkyViews 1
+- carlights.inc CarAfterDraw: nothing in full day (lamps off then: the cars' lights too) unless LampsByDay / view 24 /
+  the world editor; the CPU's staging capture every other frame (its tracking goes by time).
+- sky.inc: cs->hist = false for the main view too (as before 1.98h); the sets per view kept (no targets made anew).
+- SkyViews default 1 (ours without our clouds in the game's reflections); profile item "with our clouds" (alt 2).
+- Backups *_v198i (+ carlights_v198i.inc.bak). Staged as NewLook_v198j_pending.asi (the game running), copied on close.
+- Installed 17:29 (after the game closed).
+- User (1.98j): the clouds no longer shake, no smears, puddles fine; traffic no longer costs by day; at night 56 / 64
+  FPS with / without traffic. Also: the car paint reflects the game's clear-day clouds in a storm; the far mountain
+  never takes our look (always hazy, bright against a storm sky); sharp contour-like steps in storm clouds, more with
+  SkyFast 2.
+
+## 1.98k: the game's reflections' sky in a storm; a car's GPU copies cut
+- sky.inc main(): with no cloud picture of ours (SkyViews 1 in the game's views) the game's cloud layers fade with our
+  cover (0.3 -> 0.8) and the sky goes the deck's grey (x0.7). kSkyMain split in two literals (MSVC C2026).
+- carlights.inc CarAfterDraw: the GPU list (the lamp fix's car matrices) gets a car's big parts only (mesh bounds over
+  2.5 m; parts not read back yet still copied); MeshOf once a draw (the staging uses it).
+- Staged NewLook_v198k_pending.asi (the game running).
+- TODO: the far mountain (what draws it: haze colour vs our storm sky?); the storm clouds' contour steps (SkyFast /
+  the deck's march steps).
+- Installed 17:41 (after the game closed).
+- User (1.98k): night 62-69 FPS with / without traffic. The car still reflects drifting clouds and a sun glint in a
+  storm: "the car uses the standard reflections, not ours".
+
+## 1.98l: the car's reflections in a storm: the game's second-layer sky shader replaced too; no sun there behind a deck
+- The game's sky shader with a second cloud layer (499EBBB8, SecondaryCloudSampler) was never replaced (SkyNoteGame
+  left it out): the game's own clouds were drawn with it. It has the same 5 inputs as the replaced ones; its cbuffer
+  has SecondaryCloudColour at 64 and SunColour at 80. Our sky's 4 shaders are now compiled twice (SKY_SEC: that
+  cbuffer), and SkySubstitute binds the variant for the game's shader it replaces. The log says "a second cloud layer"
+  at its creation and "the game's second-layer sky shader drawn (ours instead)" the first time it draws.
+- Our sky in the views without our cloud picture (SkyViews 1: the game's reflections): the sun's glow and disc and the
+  moon's fade with hideG (our cover) as the game's cloud layers do. Nothing hid them there: that was the sun glint in a
+  storm.
+- The car's G-buffer reflection (sky shaders 0/1 in NewLook_sky.txt) = (ReflectionTexture cube rgb + its alpha) x
+  cubeSkyReflection^2 x 4.
+- Not verified in game yet. Backups *_v198k.
+- Installed 17:58.
+- User (1.98l, storm): no game clouds in the car any more, but none of ours either; the sun still glints in the rear
+  window; when the camera does not see the sky, the scene fills with light as if the sky were clear. A frame trace taken.
+- The trace: the second-layer sky shader is the game's 512^2 reflection cube (6 faces a frame, each a small deferred
+  frame); the main view's sky is the plain one. The glint: the cars' glass is forward-shaded (CrackedGlass* shaders,
+  KeyLightColour in gObjectCB at 16 x pow(N.H) x the game's shadow map): the game's sun at full strength, no clouds.
+
+## 1.98m: our clouds in the game's reflections (from the sky probe); the glass's sun glint under our clouds
+- Our sky shader in the views without our cloud picture (SkyViews 1) returns the sky probe (t16, the 128^2 cube with
+  our sky and clouds, a face a frame for the puddles) in its direction: our clouds in the cars at no march's cost.
+  SK12.z = the probe drawn in the last 30 frames (else the 1.98k / 1.98l fallback: the game's clouds hidden by cover).
+- skyrefl.inc KlNote / KlBefore: shaders with cubeReflectionSampler and a KeyLightColour get a copy of that buffer with
+  KeyLightColour x our clouds at the camera (g_csSunHere) x the deck's (SkyDeckSunK), the way SkyReflBefore swaps
+  its buffer. Logged every 900 frames: "game's glass (skyrefl.inc): N shaders, draws, its sun x k".
+- Open: the light when the sky is out of view: the game's eye adaptation? (asked the user).
+- Backups *_v198l (+ skyrefl_v198l.inc.bak). Staged as NewLook_v198m_pending.asi (the game was running).
+- Installed 18:09 (after the game closed; cmp checked).
+- User (1.98m): the scene brightens over a couple of seconds when the sky is out of view, shadows seem visible; the cars
+  still reflect the game's sunny sky (paint and glass), the glint is still there, the car looks lit by a sunny day.
+- Its log: "game's glass: 15 shaders, ~150 draws a frame, its sun x 0.00": KeyLightColour was not the glint. So the
+  cars' cube map (cubeReflectionSampler) holds the sun and the clear sky.
+- The brightening: our sun pass dimmed the sun by the cloud shadows only (no deck rule): in a storm the sun came through
+  thin places with shadows; the eye adaptation raised it further when the bright sky left the view.
+
+## 1.98n: the cars' cube map -> our sky probe; the sun through a thick deck in the sun pass too
+- skyrefl.inc CrBefore / CrAfter: shaders with a cube texture named cubeReflectionSampler (found by reflection, all
+  bound resources) get our sky probe there while our sky is on and the probe is fresh, if the bound cube is not a
+  render target (the game's static one; one it draws is kept). Each cube seen is logged once: "game's car reflections:
+  cube ... WxH, mips, format, bind, usage: our sky probe instead / kept".
+- NewLook.hlsl PS_Sun: Fc (our sun) x lerp(1, SK12.x, CloudDeck()), the same rule as the sky's glow ("the sun through
+  a thick cloud deck", P236): with 0 no direct sun in a storm.
+- Backups *_v198m (+ NewLook_v198m_installed.hlsl.bak).
+- Installed 18:17.
+- User (1.98n): the cars still reflect the game's; log: "game's car reflections: cube 512x512, 10 mips, format 9, bind 28
+  (render target): kept". The cars' cube map is the game's own 512^2 view around the car (6 faces a frame, each a
+  small deferred frame): its sky is ours since 1.98l / 1.98m (the probe), but its city is lit by the game's deferred
+  sun at full strength (ours lights the main view only) and its effects (the sun sprite) are drawn there.
+
+## 1.98o: the game's reflections' views: its sun under our clouds, no sun sprite there in a storm
+- skyrefl.inc KlNote: also the game's deferred sun shaders (deferred_normalBufferSampler + cubeIrradianceSampler,
+  KeyLightColour in their cbuffer); KlBefore scales their KeyLightColour like the glass's (our clouds at the camera x
+  the deck), off the main view only (MainTarget: there our sun pass).
+- KlVfxSkip: the game's effects (gVfxConstants + TonemapSampler) are not drawn off the main view while that factor is
+  under 0.3 (the sun hidden): the sun sprite in the car's cube map glinted in the glass.
+- Backups *_v198n.
+- Installed 18:23.
+- User (1.98o): the sun glint is gone; the cars' reflections still look the game's.
+- The paint (28 CrumpleTextureSampler shaders): its clear coat reflects cubeReflectionSampler (the game's 512^2 view
+  around the car) x the coat's Fresnel; its base layer EnvironmentSpecularTextureSampler (a cube, squared x 4, lod by
+  roughness) x AmbientSpecSampler (3D); written as sqrt into the G-buffer's 4th target.
+
+## 1.98p: Shift+U also saves the cars' cube map
+- skyrefl.inc CrDump: at the first car draw after Shift+U, the cube bound at cubeReflectionSampler (mip 0 of its 6
+  faces, half floats) saved as NewLook_capture\carcube_0..5.png (v / (1 + v), gamma 2.2), the mean in the log ("car
+  cube: face N saved"). To see what the cars reflect before changing it further.
+- Backups *_v198o. Staged as NewLook_v198p_pending.asi (the game was running).
+- Installed 18:29 (after the game closed; cmp checked).
+- User (1.98p): the cube's 6 faces (NewLook_capture\carcube_*.png): our storm sky (the probe) and a dull grey city:
+  our clouds are in the cars now ("all good"). Left: the car looks matte in a storm (its reflection darker than the
+  street seen: the cube has no haze and its city only the game's ambient light); a haze / "sunset" on the buildings
+  the user puts down to the eye adaptation: asked to switch it off or weaken it a lot.
+
+## 1.98q: the game's eye adaptation weakened (EyeAdapt, 268)
+- ExpoAdapt (newlook.cpp, from ExpoGrab at the game's tone-mapping draw, normal views only): the game's 1x1 exposure
+  texture (R16G16B16A16 / R32 float, all 4 channels) copied to a ring of 3 staging textures before it is changed,
+  read 2 frames late (DO_NOT_WAIT); a slow average kept in log space (time constant 20 s); the texture then set to
+  avg x (game / avg)^EyeAdapt with UpdateSubresource. 1 = the game's as it is (nothing done), 0 = the slow average only
+  (day / night still follow over ~20 s). Default 0.3.
+- Param 268 "Eye adaptation (1 = the game's)" in COLOUR after the exposure; kNewParams (red dot).
+- Not verified: whether the game's own adaptation reads this texture back (then ours feeds it).
+- Backups *_v198p (+ sections_v198p.inc.bak). Staged as NewLook_v198q_pending.asi (the game was running).
+- Installed 18:42 (after the game closed; cmp checked).
+- User (1.98q): the car still looks matte in a storm (no gloss on its curves); with SkyViews 2 at 80 % cloud resolution a
+  seam in the reflected clouds (seen in carcube too) and they are very noisy; EyeAdapt changed nothing; the user thinks
+  the "sunset" is the haze lit by the evening / day sun regardless of the overcast.
+
+## 1.98r: EyeAdapt works on the game's typeless texture; the haze under a deck; no seam in the other views' clouds
+- ExpoAdapt: the game's exposure texture is typeless (R16G16B16A16_TYPELESS, 9; the car cube too): 1.98q accepted
+  float formats only and did nothing. Now 1..2 (R32) and 9..10 (R16); its format logged once, its values, the average
+  and our factor every 600 frames ("eye adaptation: ...").
+- NewLook.hlsl AirLight: the air's sky light under a thick deck (CloudDeck) neutral grey and x lerp(1, 0.55 - 0.2 rain,
+  deck): it was the sun's sky light (lumS) whatever the cover.
+- sky.inc SkyBeforeDraw: the other views' cloud picture at half size at most, and the march / resolve viewports the
+  picture's whole size (cw, ch): 512 x 80 % = 409.6 left its last column unwritten (the seam).
+- Backups *_v198q (+ NewLook_v198q_installed.hlsl.bak). Staged as NewLook_v198r_pending.asi / .hlsl (the game was running).
+- Installed 18:57 (after the game closed; asi and hlsl cmp checked).
+
+## 1.98s: the deck reaches the horizon in a storm; the sky's gradient grey under it; EyeAdapt's unused channels
+- The user (AIR off, storm): the map's edge bright as at sunset, "as if not covered", lighting the city. Cause: our
+  cloud pass fades the clouds out toward the horizon (exp(-t0/60 km) x smoothstep(0.003, 0.05, el)) and draws none
+  under 3 deg or below the horizon; there the game's clear-sky gradient (sunset pink) showed, grey only to 80 %, and the
+  sky probe (the city's ambient) took it in. (The game's own fog shaders ScattCoeffs / LayerFogCoeffs, dumped to
+  scratchpad fog/: fog colour = GradientTextureA (1D, sampled at the screen's u) x height/distance fog; the inscatter
+  ScatteringColor is 0 by default. Left alone for now.)
+- sky.inc clouds(): under CloudDeck what the march leaves out ((1 - fade) x deck) filled with the far deck's grey
+  (ambBot 0.8 + ambTop 0.1 + the sun through it 0.3), behind the rest (col += Tall x lost x deckC, Tall x (1 - lost)).
+- sky.inc Setup: s.grad desaturated by CloudDeck x 0.85 (the sky and the clouds' sky light). main(): the grey of heavy
+  cover max(ov x 0.8, CloudDeck()).
+- ExpoAdapt: channels the game leaves 0 (rgb; it uses .w) written as 0 (1.98r wrote 1 there).
+- Backups *_v198r (sky, newlook, menu, bench) + NewLook_v198r.asi.bak. NewLook.hlsl unchanged. fxc: main / clouds /
+  resolve / shadowmap with and without SKY_SEC. Staged as NewLook_v198s_pending.asi (the game was running).
+- Installed 19:15 (after the game closed; asi cmp checked).
+
+## 1.98t: under a thick deck the game's fog gradient, its fill light and the sky's gradient grey; no sun shadows in the fill
+- The user (1.98s): the horizon grey now, but in a storm the world still looks sunlit: the haze glows white, without
+  it the distance is still bright, the far buildings pink.
+- skyrefl.inc GfBefore / GfAfter: the game's fog shaders (GradientTextureA 1D + LayerFogCoeffs / ScattCoeffs: f_001..004
+  in scratchpad fog/: fog colour = the gradient x the fog amount, its alpha the amount) under SkyDeck() (CloudDeck on
+  the CPU) get a copy of their gradient: read back 2 frames late (DO_NOT_WAIT, a ring of 3), colour lerped to its
+  mean luminance x (0.8 - 0.25 rain) x grey by deck x 0.9, alpha kept; formats RGBA8 / BGRA8 / R32 / R16 (others
+  logged and left alone). Log: "game's fog: its gradient ..." once per texture, every 900 frames the draws.
+- sky.inc Setup: under the deck s.grad = the gradient's mean over the dome (5 heights x A and B: the sky VS samples it
+  by |dome y| (0 horizon .. 1 zenith), A / B mixed toward / away from the sun), grey, by deck x 0.9: the sky and the
+  clouds' light no longer brighter / pinker toward the horizon. The far deck (1.98s) ambBot 0.65 + ambTop 0.05
+  (was 0.8 / 0.1: brighter than the clouds' base: an edge).
+- NewLook.hlsl PS_Sun: the game's non-sun light (ambient) grey under the deck by day (x 0.85; not at night: lamps);
+  shadowAmt (the fill darker / bluer in the sun's shadows) x Fc / F: none where our clouds take the sun (the sun's
+  shadow pattern stayed in the fill in a storm). AirLight under the deck x lerp(1, 0.35 - 0.15 rain) (was 0.55 - 0.2).
+- Backups *_v198s (sky, newlook, menu, bench, skyrefl, NewLook.hlsl) + NewLook_v198s.asi.bak +
+  NewLook_v198s_installed.hlsl.bak. fxc: sky main / clouds / resolve / shadowmap +- SKY_SEC; PS_Sun / PS_Air / PS_Half (9 ok).
+- Installed 19:38 (the game closed; asi and hlsl cmp checked).
+
+## 1.98u: the fog's grey gradient one copy for all (it flickered)
+- The user (1.98t): everything that was the bright distance flickers, often. The log: the fog's gradient is a new
+  texture each frame (4 different ones in 4 frames: a ring, 64 wide, R16G16B16A16 typeless, view float). 1.98t kept a
+  copy per texture with 4 slots: most frames found none and the game's colour stayed.
+- skyrefl.inc GfBefore: one copy (ours) for all of them; each frame the one bound at the first fog draw copied to the
+  read-back ring; any gradient of the same size and format gets ours (16 looked-at pointers cached, reset when full).
+- The user's second shot also had the minimap garbled (once?): watch for it.
+- Backups *_v198t (skyrefl, newlook, menu, bench) + NewLook_v198t.asi.bak. NewLook.hlsl unchanged.
+- Installed 19:44 (the game closed; asi cmp checked).
+
+## 1.98v: overcast light: the game's sky light swapped for the deck's under a thick deck (+ SkyOvercastLight, 269)
+- The user (1.98u: no flicker): the city still too bright, lit "as by the sun" in a storm (warm on the walls facing the
+  sunset; Shift+U 03_game_sun_light shows the game's sun, which ours already replaces x Fc = 0). Cause: the game's sky
+  light (its sun shaders: 4 x cubeIrradiance(n)^2 x AO (diffuse.a) x (1 - F0) x albedo; lit/s_011) is its clear sky's
+  by the time of day: brighter and warmer toward the sun. 1.98t only greyed it (and by day only).
+- NewLook.hlsl PS_Sun: under CloudDeck that part (tGameIrr t63, already bound with F_IRR) taken out (never more than
+  the ambient there: some variants mix in a second cube, s_013) and the deck's put in: the CIE overcast sky over ground
+  of albedo 0.15: a roof 1, a wall 0.47, a ceiling 0.16 (eO(y) = 0.47 + 0.42 y + 0.11 y^2); the roof's = the cube's mean
+  over 6 axes x 1.6 x (1 - 0.3 rain) x SkyOvercastLight, slightly cool. Lamps, windows (the additive) kept. Day and night.
+  The sky reflection (envS, the cube by the mirror ray) the deck's too: roof x 9/7 x (1 + 2 cos t) / 3, below 0.15.
+  1.98t's greying of the ambient replaced by this.
+- newlook.cpp: param 269 SkyOvercastLight "Sky: light under a thick deck" 1 (0..2) -> P34.y; SKY & CLOUDS after 236;
+  kNewParams + 269.
+- Backups *_v198u (NewLook.hlsl, newlook, sections, menu, bench) + NewLook_v198u.asi.bak + NewLook_v198u_installed.hlsl.bak.
+  fxc PS_Sun / PS_Air / PS_Half 9 ok.
+- Installed 20:01 (the game closed; asi and hlsl cmp checked).
+
+## 1.98w: the exposure under a thick deck (SkyOvercastExpo, 270)
+- The user (1.98v): whatever is set (even SkyOvercastLight 0) the storm is still too bright. Their ini: EyeAdapt=1
+  (the game's eye adaptation whole): it brings any darker scene back to its usual brightness.
+- The game's tone mapping (tone/t_013, t_017 in scratchpad: 1 - exp(-c x w), w = the 1x1 exposure texture's .w): w is
+  a multiplier (larger = brighter); its G-buffer shaders divide the additive (emissive) by it, so windows and signs keep
+  their brightness on screen whatever w.
+- ExpoAdapt: w (all non-zero channels) x (1 + (SkyOvercastExpo - 1) x SkyDeck()); also with EyeAdapt 1 (then the
+  game's value as read, 2 frames late). Log line: "... (the deck's x N)".
+- param 270 SkyOvercastExpo "Sky: brightness under a thick deck" 0.6 (0.2..1.5); SKY & CLOUDS after 269; kNewParams + 270.
+- Backups *_v198v (newlook, sections, menu, bench) + NewLook_v198v.asi.bak. NewLook.hlsl unchanged.
+- Installed 20:09 (the game closed; asi cmp checked).
+
+## 1.98x: 1.98w's exposure out; the sun under a full cover gone whatever the rain clouds (SunDeck)
+- The user (1.98w): the exposure bias just shifts the whole frame and made it jerk (the game's adaptation reads its last
+  value back: x 0.6 each frame against it): out, newlook / sections / menu / bench back to 1.98v (param 270 gone).
+- The user: OVERCAST (cover 1.00, rain clouds 0.35) shows our sun's light clear on the walls, STORM (rain clouds 1)
+  not; it comes and goes over time. Cause: CloudDeck = by cover x (0.6 + 0.4 rain clouds) = 0.74 there: Fc kept 26 %
+  of the sun (x the cloud shadows' 0.9) and the overcast light (1.98v) was 74 % of the way.
+- sky.inc SunDeck() = saturate((cover - 0.75) / 0.2): the cover alone. For the light: PS_Sun Fc, the overcast light
+  (dkA), AirLight's greying and mie, the sky's sunK (glow, disc, the clouds' sun), its gradient greying, the far deck
+  fill, the grey of heavy cover; CPU: SkyDeckSunK (glass, corona), SkyDeck (fog gradient), the flare cb's deck.
+  CloudDeck (with the rain part) kept for the clouds' own density / scattering.
+- Backups *_v198w (sky, NewLook.hlsl, skyrefl, sunshadow, newlook, sections, menu, bench) + NewLook_v198w.asi.bak +
+  NewLook_v198w_installed.hlsl.bak. fxc: sky 8/8, PS_Sun / PS_Air / PS_Half 9 ok.
+- Installed 20:21 (the game closed; asi and hlsl cmp checked).
+
+## 1.98y: the overcast light actually in the picture
+- The user (1.98x): the facing-the-sun glow still there in the final image; view 6 ("check: red = estimate error":
+  max(ambient, 0)) already shows it right (grey, even), view 7 is the game's own sun (taken out anyway).
+- Cause: the sun pass's result is blended: dest x K + S (BLEND_OUT): the change made to "ambient" (1.98t's greying,
+  1.98v's overcast light) never reached it; only the debug view and the non-blend variant used it.
+- NewLook.hlsl PS_Sun: ambD (the change) kept and added to S: (add - sunOrig x K + ambD x K) x hazeT. (Never below 0:
+  what is taken out is at most max(ambient, 0) <= dest.)
+- Backups *_v198x (NewLook.hlsl, newlook, menu, bench) + NewLook_v198x.asi.bak + NewLook_v198x_installed.hlsl.bak.
+  fxc PS_Sun / PS_Air / PS_Half 9 ok.
+- Installed 20:30 (the game closed; asi and hlsl cmp checked).
+
+## 1.98z — the game's sky light really taken out in a storm (fast path)
+- Cause found with the user's captures: the captures draw the copy variant of the sun pass (dest read), the game draws
+  BLEND_OUT (fast path, dest = 0 in the shader). 1.98v's `ambG = min(cube² × kD, max(ambient, 0))` was 0 there: the
+  game's clear-sky light (warm, brighter on the walls facing the sun) was never taken out in game, only in captures.
+  Also why view 6 ("check") looked black in game: it shows ambient, which is -sunOrig under BLEND_OUT.
+- BLEND_OUT: `ambG = cube² × kD` (the game's term itself); the copy variant keeps the min.
+- Note: views 6 / 9 are only meaningful in captures (Shift+U) or with Fast path off.
+- Installed 21:11.
+
+## 1.98aa — storm: the car, the transition, the eye adaptation
+- Car: the overcast replacement (ambD) not on cars (x (1 - carK)): their sun shader's sky light is their own cube map,
+  not tGameIrr; 1.98z took it out where it was not, below 0: a blue car turned red by day under a full deck.
+- SunDeck (and SkyDeck, SkyDeckSunK, the flare cb) from 0.6 to 0.95 (was 0.75 to 0.95): the sun went from half to
+  none between 0.85 and 0.95, shadows then none.
+- Eye adaptation: the game's own 1x1 exposure saved (GPU copy) before ours is written, put back after its tone-mapping
+  draw (AfterDraw -> ExpoRestore): its adaptation goes on from that texture, ours was fed back (jerks at EyeAdapt 0.3).
+- Note from the user's screenshots: "light under a thick deck" was 0.00 in them (the black-and-white look: no sky light).
+- Installed 22:18.
+
+## 1.98ab — eye adaptation: no flicker from odd reads
+- The log showed the game's exposure as read jumping 1.6 -> 11.5 -> 1.65 (a frame each): went straight into ours, the
+  screen flickered dark / bright many times a second at EyeAdapt 0.3 (1.98aa's restore did not cure it).
+- Now: median of the last 5 reads, then smoothed in log space (~0.25 s); the 20 s average from that. Odd reads (x2 off
+  the median) logged (first 20) to find their source later.
+- Installed 22:28.
+
+## Release 1.98 packaged (2026-10-26)
+- User (Zelef): grass off by default, the lawns still without puddles; the dots only on the grass and the weather
+  (experimental), orange; the zip with his saved settings.
+- grass.inc: the lawns found always (the mask, the map from above, the dry draws): no puddles on them with the grass
+  off too; "Grass" now draws the blades only (the map pass runs, the blade loop skipped).
+- menu.inc: kNewParams = the grass (261-264) and the weather (208-216, 237, 238); the dot orange (C_EXP); WEATHER's
+  header with an orange dot; its hint "(experimental)". SkyTest out of the SKY menu (the pass profile keeps it, as
+  PerfTest). Version strings "1.98".
+- Installed 22:46. publish/release/NewLook_1.98(.zip), 1,723,349 bytes, 13 files: dinput8.dll, the user's ini
+  (Grass 0, SkyTest / PerfTest 0, SkyOvercastExpo line dropped; SecWeather 0 as he saved it), his lamps, zones,
+  presets, templates, carlights. No FPS Unlock. um publish check: PASS. READMEs: only the version changed.
+- TODO: our own eye adaptation (the plan).

@@ -316,9 +316,30 @@ static Param g_p[] = {
     { "SecWind", "Section: wind", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
     { "SecLook", "Section: colour", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
     // 1.96f: the clouds' march made cheaper (sky.inc): longer steps far off, fewer light samples, out when opaque
-    { "SkyFast", "Sky: faster clouds (1: longer steps inside far clouds, fewer light samples; 2: also through the gaps; 0: as before)", 1.0f, 0.0f, 2.0f, 1.0f, 0 },
+    { "SkyFast", "Clouds faster (0 as before, 2 most)", 1.0f, 0.0f, 2.0f, 1.0f, 0 },
     // 1.96g: the 1-pixel white rims on things' edges (reflections): the edge-on pixels' grazing Fresnel off (NewLook.hlsl PS_SSRApply)
-    { "SsrEdges", "Reflections: no white 1-pixel rims on edges (an edge-on pixel reflects as face on)", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "SsrEdges", "No white rims on edges", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    // 1.96j: the street lamps cheaper at night (NewLook.hlsl: PS_Tiles, LampShade, LampVis)
+    { "LampTileDepth", "Lamps cut per tile by depth (faster)", 1.0f, 0.0f, 1.0f, 1.0f, 0 },
+    { "LampShadowMin", "Lamp shadows skipped under, share", 0.03f, 0.0f, 0.2f, 0.01f, 0 },
+    // 1.96n: a test (not saved as a look): one part of our sky left out, to see what it costs (sky.inc, skyrefl.inc)
+    { "SkyTest", "Sky test: 1 march 2 shad 3 probe 4 tint 5 game", 0.0f, 0.0f, 5.0f, 1.0f, 0 },   // (1.98h: 6 is SkyViews)
+    // 1.97a: grass on the lawns (grass.inc); stage 1: the lawns found (view 38)
+    { "Grass", "Grass on the lawns", 0.0f, 0.0f, 1.0f, 1.0f, 0 },   // (1.98b: off by default: costly, put aside; 1.98: the blades only, the lawns found always)
+    // 1.97g: the blades (grass.inc)
+    { "GrassDist", "Grass distance, m", 30.0f, 5.0f, 100.0f, 5.0f, 0 },
+    { "GrassDensity", "Grass density", 1.5f, 0.25f, 6.0f, 0.25f, 0 },
+    { "GrassHeight", "Grass height", 1.0f, 0.3f, 2.5f, 0.1f, 0 },
+    // 1.98: below 100 % resolution the sharp reflections' detail rebuilt at full size (PS_SSRSharp)
+    { "ReflectionSharp", "Reflections below 100 %: sharp detail rebuilt at full size", 0.0f, 0.0f, 1.0f, 1.0f, 0 },
+    // 1.98f: a test (as SkyTest): one part of the sun pass left out, for the pass profile (NewLook.hlsl: P34.x, PerfT)
+    { "PerfTest", "Perf test: 1 2 relief 3 4 5 lamps 6 bounce", 0.0f, 0.0f, 6.0f, 1.0f, 0 },
+    // 1.98h: the sky in the game's other views (its reflections; sky.inc SkyBeforeDraw)
+    { "SkyViews", "Sky in the game's reflections", 1.0f, 0.0f, 2.0f, 1.0f, 0 },   // (1.98j: 1: our clouds there ~1 ms)
+    // 1.98q: the game's eye adaptation weakened (ExpoAdapt): 1 the game's, 0 a slow average only
+    { "EyeAdapt", "Eye adaptation (1 = the game's)", 0.3f, 0.0f, 1.0f, 0.05f, 0 },
+    // 1.98v: the light under a thick deck (overcast, storm: NewLook.hlsl ovUp): x its brightness (the game's sky's mean x 1.6)
+    { "SkyOvercastLight", "Sky: light under a thick deck", 1.0f, 0.0f, 2.0f, 0.05f, 0 },
 };
 enum { P_BOUNCE = 21, P_BOUNCE_R = 22, P_FAST = 23, P_BOUNCE_ALL = 24, P_BOUNCE_HIST = 25, P_LAMP = 26, P_LAMP_THR = 27,
        P_LAMP_REACH = 28, P_LAMP_SRC = 29, P_LAMP_DAY = 30, P_LAMP_AUTO = 31, P_LAMP_POWER = 32, P_KNOCK = 33, P_AUTO_LAMPS = 34, P_LAMP_RADIUS = 35, P_LAMP_SHADOW = 36, P_LAMP_SHADOW_T = 37, P_NIGHT_AMB = 38, P_LAMP_SHADOW_MAPS = 39, P_LAMP_SIZE = 40, P_LAMP_SHADOW_BUDGET = 41, P_LAMP_SHADOW_CUT = 42, P_SOFT_SUN = 43, P_LAMP_RES = 44, P_LOOK = 45, P_LOOK_PRESET = 61, P_SKY_OCC = 62, P_SSR = 64, P_GLOW = 68, P_HL_BEAM = 71, P_HL_GAME = 72, P_HL_SOFT = 73, P_HL_LEN = 74, P_TRAFFIC = 75, P_TR_HEAD = 77, P_TR_TAIL = 81, P_TR_FIX = 85, P_SKY = 91, P_LOOK_X = 106, P_SS = 113, P_PBR = 121, P_REL = 125, P_POM = 129, P_SS_HALF = 133, P_SS_SKIP = 134, P_SUN_PATH = 135, P_SUN_FADE = 136, P_MOON_SHADOWS = 137,
@@ -327,7 +348,7 @@ enum { P_BOUNCE = 21, P_BOUNCE_R = 22, P_FAST = 23, P_BOUNCE_ALL = 24, P_BOUNCE_
        P_HAZE_DAWN = 149, P_HAZE_DAWN_H = 150, P_HAZE_DAY = 151, P_HAZE_NIGHT = 152, P_MOON_EL = 153, P_MOON_AZ = 154, P_MOON_DRIFT = 155,
        P_LG = 156, P_LAMP_MAX = 164, P_SSR_RAY = 165, P_SSR_SKY = 166, P_WET_OTHER = 167,
        P_NOISE = 168,     // 1.43: 168 smoothing, 169 dots cut, 170 history, 171 jitter, 172 bumps, 173 spec AA, 174 wet light gloss; 175 wet sharpness; 1.46: 176 history clip
-       P_PUDDLE_BIG = 177, P_SSR_EARLY = 180 };   // 1.47: 177 big matte puddles, 178 their size, 179 their gloss; 180 the reflections' source before the effects; 1.48: 181 their water; 1.49: 182..184 the small ones' size, gloss, water
+       P_PUDDLE_BIG = 177, P_SSR_EARLY = 180, P_SSR_SHARP = 265, P_SKY_VIEWS = 267, P_EYE_ADAPT = 268 };   // 1.47: 177 big matte puddles, 178 their size, 179 their gloss; 180 the reflections' source before the effects; 1.48: 181 their water; 1.49: 182..184 the small ones' size, gloss, water
 static void LookApplyPreset(int k);
 static const int kParams = sizeof(g_p) / sizeof(g_p[0]);
 #include "sections.inc"   // 1.96: the sections' switches, the quality presets
@@ -345,8 +366,9 @@ static const char* kViews[] = { "normal", "split: left = original", "contact sha
                                 "sun shadow: this frame alone (before smoothing)",
                                 "modern lighting: the sky reflected (x4)", "modern lighting: roughness (white = rough)",
                                 "relief: grey = cavities, red = small sun shadows",
-                                "car rain: red drops held, green running, blue fine beads, yellow wet trails" };
-static const int kViewCount = 38;
+                                "car rain: red drops held, green running, blue fine beads, yellow wet trails",
+                                "grass: the lawns found (green)" };
+static const int kViewCount = 39;
 // views that show the game's own image need the copy of the frame
 static bool ViewNeedsCopy(int v) { return v == 6 || v == 8 || v == 9 || v == 13; }
 static volatile LONG g_wantDump;  // log the next main sun pass in detail
@@ -731,6 +753,7 @@ static void SkyApplyWeather(int k);
 struct DrawCall;
 static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d);
 static bool g_skyPending;
+static bool g_skyOursBound;   // 1.98g: our sky shader bound now (the immediate context; counted per draw)
 static bool g_skyDrawLog;
 static void NameShader(const void* code, SIZE_T size, ID3D11PixelShader* ps)
 {
@@ -891,6 +914,7 @@ static const int kHalfRT = 11;   // 1.49: [9] [10]: the AO over frames, this fra
 static HalfRT g_hrt[kHalfRT], g_camRec[2];
 static HalfRT g_lampLT, g_lampGT, g_lampBT;          // lamp light at the shown resolution (t35), the lamps' glow in the air (t41)
 static UINT g_lampLW, g_lampLH;
+static bool g_lampSplit;   // 1.98e: this frame's lamp pass at half size, split (the strongest lamp of a pixel in the sun pass)
 static unsigned g_lampLFrame;              // frame + 1 it was made
 static ID3D11PixelShader* g_psLamps;
 static ID3D11PixelShader* g_psGrade;
@@ -917,19 +941,31 @@ static float HalfToFloat(unsigned short h)
     return h & 0x8000 ? -v : v;
 }
 static ID3D11PixelShader* g_psSSRApply;
+static void GrassSoftBind(ID3D11DeviceContext* ctx);   // 1.97l: the lawns (grass.inc): no puddles, t85
 static ID3D11PixelShader* g_psSSRBlur;
 static ID3D11PixelShader *g_psSunMask, *g_psSunTemporal, *g_psSunUp;   // our sun shadows' mask (sunshadow.inc)
 static const int kLampsUp = 256;          // lamps sent a frame (shader buffer t33)
 static ID3D11Buffer* g_lampBuf;
 static ID3D11ShaderResourceView* g_lampSrv;
-static HalfRT g_tileRT[2];                // which lamps light which screen tile (256 bits: t31, t32)
+static HalfRT g_tileRT[6];                // which lamps light which screen tile (256 bits: t31, t32; 1.96j: cut by the tile's depth: t81, t82; 1.96k: their glow: t83, t84)
 static UINT g_tileW, g_tileH, g_tileFor[2];
+static void TileCBind(ID3D11DeviceContext* ctx)   // 1.96j: the depth-cut tiles at t81, t82 (LampShade); 1.96k: the glow's at t83, t84
+{
+    ID3D11ShaderResourceView* t[4] = { g_tileRT[2].srv, g_tileRT[3].srv, g_tileRT[4].srv, g_tileRT[5].srv };
+    ctx->PSSetShaderResources(81, 4, t);
+}
 static unsigned g_tileFrame;              // frame + 1 the tiles were made
 static ID3D11PixelShader* g_psTiles;
+static ID3D11PixelShader* g_psTileZ;       // 1.98f: the tiles' depth range in 8 x 8 blocks first
+static HalfRT g_tileZ;                     // its target (the tiles' size x 4: nearest, furthest, sky)
 static UINT g_halfW, g_halfH;
 static unsigned g_giFrame[2], g_camFrame[2], g_radFrame, g_ssrFrame[2], g_aoFrame[2];
 static HalfRT g_ssrRT[3];                  // reflections: raw, smoothed this frame / last frame (swapped)
-static HalfRT g_ssrAux;                    // 1.46: the raw ones' gloss and ray length (R16G16F; the gloss on w overflowed FP16)
+static HalfRT g_ssrAux;
+static HalfRT g_ssrHit;                    // 1.98: the raw ones' sharp hits (R32G32B32A32F: uv, distance, mip + conf), their size
+static HalfRT g_ssrDet;                    // 1.98: the sharp detail at full size (signed)
+static UINT g_ssrDetW, g_ssrDetH;
+static ID3D11PixelShader* g_psSSRSharp;                    // 1.46: the raw ones' gloss and ray length (R16G16F; the gloss on w overflowed FP16)
 static UINT g_ssrW, g_ssrH;
    // frame each one was written (+1, 0 = never)
 
@@ -972,13 +1008,15 @@ static bool EnsureLampLT(UINT w, UINT h)
 
 static bool EnsureTiles(UINT rtW, UINT rtH)
 {
-    if (g_tileRT[1].srv && g_tileFor[0] == rtW && g_tileFor[1] == rtH) return true;
+    if (g_tileRT[5].srv && g_tileFor[0] == rtW && g_tileFor[1] == rtH) return true;
     static bool failed;
     if (failed) return false;
-    for (int k = 0; k < 2; ++k) FreeRT(g_tileRT[k]);
+    for (int k = 0; k < 6; ++k) FreeRT(g_tileRT[k]);
+    FreeRT(g_tileZ);
     UINT tw = (rtW + 31) / 32, th = (rtH + 31) / 32;
-    for (int k = 0; k < 2; ++k)
+    for (int k = 0; k < 6; ++k)
         if (!MakeRT(g_tileRT[k], tw, th, DXGI_FORMAT_R32G32B32A32_UINT, false)) { Log("lamp tiles failed"); failed = true; return false; }
+    if (!MakeRT(g_tileZ, tw * 4, th * 4, DXGI_FORMAT_R32G32B32A32_FLOAT, false)) { Log("lamp tiles failed"); failed = true; return false; }
     g_tileW = tw; g_tileH = th; g_tileFor[0] = rtW; g_tileFor[1] = rtH;
     Log("lamp tiles %ux%u", tw, th);
     return true;
@@ -986,15 +1024,16 @@ static bool EnsureTiles(UINT rtW, UINT rtH)
 
 static bool EnsureSsrRT(UINT w, UINT h)
 {
-    if (g_ssrRT[2].srv && g_ssrAux.srv && g_ssrW == w && g_ssrH == h) return true;
+    if (g_ssrRT[2].srv && g_ssrAux.srv && g_ssrHit.srv && g_ssrW == w && g_ssrH == h) return true;
     static UINT failW, failH;   // (1.65: a size that failed is not tried (and logged) again every frame)
     if (failW == w && failH == h) return false;
     for (int k = 0; k < 3; ++k) FreeRT(g_ssrRT[k]);
     FreeRT(g_ssrAux);
+    FreeRT(g_ssrHit);
     g_ssrFrame[0] = g_ssrFrame[1] = 0;
     for (int k = 0; k < 3; ++k)
         if (!MakeRT(g_ssrRT[k], w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, false)) { Log("reflection targets failed"); g_ssrW = 0; failW = w; failH = h; return false; }
-    if (!MakeRT(g_ssrAux, w, h, DXGI_FORMAT_R16G16_FLOAT, false)) { Log("reflection targets failed"); g_ssrW = 0; failW = w; failH = h; return false; }
+    if (!MakeRT(g_ssrAux, w, h, DXGI_FORMAT_R16G16_FLOAT, false) || !MakeRT(g_ssrHit, w, h, DXGI_FORMAT_R32G32B32A32_FLOAT, false)) { Log("reflection targets failed"); g_ssrW = 0; failW = w; failH = h; return false; }
     g_ssrW = w; g_ssrH = h;
     Log("reflection targets %ux%u", w, h);
     return true;
@@ -1991,6 +2030,7 @@ struct LightCB {
     float P28[4];           // 1.74: the car's simulated rain drops there (t73 .. t76); fine beads blown off: top, sides, front / back
     float P29[4];           // 1.75: x = seconds (real time, wrapped at an hour: the beads' life cycles)
     float P30[4], P31[4], P32[4], P33[4];   // 1.83: rain falling (rainfall.inc): streaks, wind / ripples, the camera's velocity, rain now
+    float P34[4];           // 1.98f: x = PerfTest (the pass profile's A / B tests); 1.98v: y = SkyOvercastLight
 };
 static bool g_crValid;                       // (carrain.inc) the drops' atlas made this frame
 static float g_wxRain = -1;                  // (weather.inc) 1.82: rain falling now (0..1; -1: the weather off)
@@ -2007,7 +2047,7 @@ static ID3D11ShaderResourceView* CarMapSrv();   // (carrain.inc) 1.80: the car's
 static const char* CloudCommonSrc();
 // the game runs D3D11 at feature level 10.x: shader model 4.0
 struct ShEntry { const char* entry; const char* target; bool depth, blend; };
-static const int kShN = 35;
+static const int kShN = 37;
 static const ShEntry kShList[kShN] = {
     { "PS_Sun", "ps_4_0", false, false }, { "PS_Sun", "ps_4_0", true, false },
     { "PS_Sun", "ps_4_0", false, true },  { "PS_Sun", "ps_4_0", true, true },
@@ -2026,7 +2066,9 @@ static const ShEntry kShList[kShN] = {
     { "PS_CarGlass", "ps_4_0", false, false },   // (1.81)
     { "VS_Rain", "vs_4_0", false, false }, { "PS_Rain", "ps_4_0", false, false },   // (1.83)
     { "VS_Splash", "vs_4_0", false, false }, { "PS_Splash", "ps_4_0", false, false },
-    { "VS_Lens", "vs_4_0", false, false }, { "PS_Lens", "ps_4_0", false, false } };   // (1.84)
+    { "VS_Lens", "vs_4_0", false, false }, { "PS_Lens", "ps_4_0", false, false },   // (1.84)
+    { "PS_SSRSharp", "ps_4_0", false, false },   // (1.98)
+    { "PS_TileZ", "ps_4_0", false, false } };    // (1.98f)
 // 1.59: the 28 (1.81: 29; 1.83: 33; 1.84: 35) compiled on several threads (each its own entry; d3dcompiler_47 is thread-safe), through the cache
 struct ShJob { const char* src; long n; ID3DBlob* code[kShN]; ID3DBlob* err[kShN]; HRESULT hr[kShN]; volatile LONG next; };
 static DWORD WINAPI ShWorker(LPVOID p)
@@ -2143,7 +2185,8 @@ static bool CompileShaders(ID3D11Device* dev)
                                    (ID3D11DeviceChild**)&g_psSunMask, (ID3D11DeviceChild**)&g_psSunTemporal, (ID3D11DeviceChild**)&g_psSunUp,
                                    (ID3D11DeviceChild**)&g_psPano, (ID3D11DeviceChild**)&g_psCity, (ID3D11DeviceChild**)&g_psCarGlass,
                                    (ID3D11DeviceChild**)&g_vsRain, (ID3D11DeviceChild**)&g_psRain, (ID3D11DeviceChild**)&g_vsSplash, (ID3D11DeviceChild**)&g_psSplash,
-                                   (ID3D11DeviceChild**)&g_vsLens, (ID3D11DeviceChild**)&g_psLens };
+                                   (ID3D11DeviceChild**)&g_vsLens, (ID3D11DeviceChild**)&g_psLens, (ID3D11DeviceChild**)&g_psSSRSharp,
+                                   (ID3D11DeviceChild**)&g_psTileZ };
     for (int k = 0; k < kShN; ++k) { if (*dst[k]) (*dst[k])->Release(); *dst[k] = made[k]; }
     g_compileError[0] = 0;
     Log("NewLook.hlsl compiled");
@@ -2503,11 +2546,28 @@ static void Capture(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& dc, Li
 
 // (snap runs inside air: the mod's total counts air only)
 enum { PR_GAMESUN, PR_COPY, PR_HALF, PR_BLUR, PR_LAMPS, PR_SUN, PR_SNAP, PR_SSR, PR_AIR, PR_LOOK, PR_OVERLAY, PR_SSMASK, PR_SHPASS, PR_PAD, PR_EARLY, PR_PROBE,
-       PR_CLOUDS, PR_CSHADOW, PR_SKYDRAW, PR_COUNT };   // (1.96f: the sky's: the clouds' march and resolve, their shadow map, the sky draw)
+       PR_CLOUDS, PR_CSHADOW, PR_SKYDRAW, PR_GRASS, PR_TILES, PR_AO, PR_APPLY, PR_AIRPS, PR_WETGLOSS, PR_COUNT };   // (1.96f: the sky's: the clouds' march and resolve, their shadow map, the sky draw)
+// (1.98b: parts timed apart: in half-res the camera record with the lamps' fix and tiles, its own pass with the AO blur;
+// in air the reflections onto the frame, the air itself; and the wet gloss, untimed before)
 static const char* kProfNames[PR_COUNT] = { "game sun", "copy", "half-res", "blur", "lamps", "sun", "snap", "reflections", "air (with snap, refl.)", "look", "overlay", "sun shadow mask", "shadow pass (game + ours)", "bench padding", "reflections' copy", "sky probe",
-                                            "clouds", "cloud shadows", "sky" };
+                                            "clouds", "cloud shadows", "sky", "grass", "tiles (in half)", "half pass (in half)", "refl. apply (in air)",
+                                            "air itself (in air)", "wet gloss" };
+// 1.98b: the mod's own passes, each once (snap, the reflections and the parts of air are in air; the sun shadow mask, the
+// tiles and the half pass in half-res). (The quick bench counted the mask twice.)
+static const int kModPass[] = { PR_COPY, PR_HALF, PR_BLUR, PR_LAMPS, PR_SUN, PR_AIR, PR_LOOK, PR_EARLY, PR_PROBE, PR_CLOUDS, PR_CSHADOW, PR_SKYDRAW,
+                                PR_GRASS, PR_WETGLOSS };
+static double ModPassMs(const double* g) { double s = 0; for (int k : kModPass) s += g[k]; return s; }
 static bool g_skyDrawTimed;   // 1.96f: the sky draw's end mark due (AfterDraw)
-struct ProfFrame { ID3D11Query* dis; ID3D11Query* t[PR_COUNT][2]; ID3D11Query* f[2]; bool used[PR_COUNT]; bool live; };
+// 1.98h: the frame map: marks at the game's views (their sky draws), its sun-shadow pass, its lighting, its final
+// picture and our late pass; the GPU time and the game's draws between them, logged with the stats (every 10 s). To see
+// what costs in the game's own frame (the traffic: ~10 FPS, none of it in our passes' timings)
+enum { FM_VIEW, FM_SHADOW, FM_SHADOW_END, FM_LIGHT, FM_FINAL, FM_AIR, FM_KINDS };
+static const int kFmMax = 16;
+static LONG g_fmDraws;   // the game's draws this frame (AfterDraw)
+struct ProfFrame { ID3D11Query* dis; ID3D11Query* t[PR_COUNT][2]; ID3D11Query* f[2]; bool used[PR_COUNT]; bool live; int tag; unsigned flags;
+                   ID3D11Query* m[kFmMax]; int mN; unsigned char mK[kFmMax]; unsigned short mW[kFmMax], mH[kFmMax]; LONG mD[kFmMax], endD; };
+static int g_pfTag, g_pfTagRead;   // 1.98c: the pass profile's state for the frame opened next; of the frame read (0: none)
+static unsigned g_pfFlagsRead;     // 1.98d: the frame read's states (1 the sun shadow mask missing, 2 no half-res pass, 4 lamp tiles not ready)
 static const int kProfLag = 5;
 static ProfFrame g_pf[kProfLag];
 static int g_pfIdx;
@@ -2526,6 +2586,7 @@ static bool ProfInit()
         for (int k = 0; k < PR_COUNT && ok; ++k)
             ok = SUCCEEDED(g_dev->CreateQuery(&ts, &g_pf[f].t[k][0])) && SUCCEEDED(g_dev->CreateQuery(&ts, &g_pf[f].t[k][1]));
         ok = ok && SUCCEEDED(g_dev->CreateQuery(&ts, &g_pf[f].f[0])) && SUCCEEDED(g_dev->CreateQuery(&ts, &g_pf[f].f[1]));
+        for (int k = 0; k < kFmMax && ok; ++k) ok = SUCCEEDED(g_dev->CreateQuery(&ts, &g_pf[f].m[k]));   // (1.98h: the frame map)
         if (!ok) { g_profFailed = true; Log("timing: queries not available"); return false; }
     }
     g_profOk = true;
@@ -2540,6 +2601,75 @@ static void ProfMark(ID3D11DeviceContext* ctx, int id, int end)
     ProfFrame& f = g_pf[g_pfIdx];
     ctx->End(f.t[id][end]);
     if (end) f.used[id] = true;
+}
+
+// 1.98h: a frame map mark (the immediate context; a view's: the size of what it draws into)
+static void FmMark(ID3D11DeviceContext* ctx, int kind)
+{
+    if (!g_pfStarted || !Immediate(ctx)) return;
+    ProfFrame& f = g_pf[g_pfIdx];
+    if (f.mN >= kFmMax) return;
+    UINT w = 0, h = 0;
+    if (kind == FM_VIEW) {
+        ID3D11RenderTargetView* rt = 0;
+        ctx->OMGetRenderTargets(1, &rt, 0);
+        if (rt) {
+            ID3D11Resource* r = 0; rt->GetResource(&r);
+            ID3D11Texture2D* t = 0; if (r) { r->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t); r->Release(); }
+            if (t) { D3D11_TEXTURE2D_DESC td; t->GetDesc(&td); w = td.Width; h = td.Height; t->Release(); }
+            rt->Release();
+        }
+    }
+    ctx->End(f.m[f.mN]);
+    f.mK[f.mN] = (unsigned char)kind; f.mW[f.mN] = (unsigned short)w; f.mH[f.mN] = (unsigned short)h; f.mD[f.mN] = g_fmDraws;
+    ++f.mN;
+}
+// the frames read since the last log: those with the first one's marks summed (the others counted)
+static int g_fmRefN;
+static unsigned char g_fmRefK[kFmMax];
+static unsigned short g_fmRefW[kFmMax], g_fmRefH[kFmMax];
+static double g_fmT[kFmMax + 1], g_fmD[kFmMax + 1];
+static unsigned g_fmN, g_fmOdd;
+static void FmRead(ID3D11DeviceContext* ctx, ProfFrame& f, double ms)
+{
+    UINT64 a = 0, b = 0, t[kFmMax];
+    if (ctx->GetData(f.f[0], &a, 8, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK || ctx->GetData(f.f[1], &b, 8, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK || b < a) return;
+    for (int k = 0; k < f.mN; ++k)
+        if (ctx->GetData(f.m[k], &t[k], 8, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK || t[k] < a || t[k] > b) return;
+    bool same = g_fmRefN == f.mN;
+    for (int k = 0; k < f.mN && same; ++k) same = g_fmRefK[k] == f.mK[k] && g_fmRefW[k] == f.mW[k] && g_fmRefH[k] == f.mH[k];
+    if (!same) {
+        if (g_fmN) { ++g_fmOdd; return; }
+        g_fmRefN = f.mN;
+        for (int k = 0; k < f.mN; ++k) { g_fmRefK[k] = f.mK[k]; g_fmRefW[k] = f.mW[k]; g_fmRefH[k] = f.mH[k]; }
+        for (int k = 0; k <= kFmMax; ++k) g_fmT[k] = g_fmD[k] = 0;
+    }
+    UINT64 prev = a;
+    LONG pd = 0;
+    for (int k = 0; k < f.mN; ++k) { g_fmT[k] += (t[k] - prev) * ms; g_fmD[k] += f.mD[k] - pd; prev = t[k]; pd = f.mD[k]; }
+    g_fmT[f.mN] += (b - prev) * ms; g_fmD[f.mN] += f.endD - pd;
+    ++g_fmN;
+}
+// the stats' line: each part of the frame, up to the mark that ends it
+static void FmText(char* out, int n)
+{
+    *out = 0;
+    if (g_fmN) {
+        static const char* kNames[FM_KINDS] = { "view", "sun shadows (the game's + ours)", "after its shadows", "the game's lighting",
+                                                "its final picture", "our late pass" };
+        double k = 1.0 / g_fmN, all = 0;
+        for (int j = 0; j <= g_fmRefN; ++j) all += g_fmT[j];
+        char* p = out;
+        p += _snprintf(p, n - 1, "frame map: %u frames alike (%u others), GPU %.2f ms; the parts up to each mark (ms, the game's draws):",
+                       g_fmN, g_fmOdd, all * k);
+        for (int j = 0; j <= g_fmRefN && p - out < n - 120; ++j) {
+            if (j == g_fmRefN) p += sprintf(p, " | to Present %.2f, %.0f", g_fmT[j] * k, g_fmD[j] * k);
+            else if (g_fmRefK[j] == FM_VIEW) p += sprintf(p, " | to view %ux%u %.2f, %.0f", g_fmRefW[j], g_fmRefH[j], g_fmT[j] * k, g_fmD[j] * k);
+            else p += sprintf(p, " | to %s %.2f, %.0f", kNames[g_fmRefK[j]], g_fmT[j] * k, g_fmD[j] * k);
+        }
+        out[n - 1] = 0;
+    }
+    g_fmN = g_fmOdd = 0; g_fmRefN = 0;
 }
 
 static double Smooth(double old, double v) { return old <= 0 ? v : old + (v - old) * 0.08; }
@@ -2563,6 +2693,7 @@ static void ProfFrameEnd(ID3D11DeviceContext* ctx)
     ProfFrame& f = g_pf[g_pfIdx];
     ctx->End(f.f[1]);
     ctx->End(f.dis);
+    f.endD = g_fmDraws;
     f.live = true;
 }
 
@@ -2589,10 +2720,16 @@ static void ProfFrameBegin(ID3D11DeviceContext* ctx)
                 g_gpuMs[k] = g_gpuMs[k] + (v - g_gpuMs[k]) * 0.08;
                 raw[k] = v;
             }
+            if (f.mN) FmRead(ctx, f, ms);   // (1.98h)
+            g_pfTagRead = f.tag; g_pfFlagsRead = f.flags;
             BenchSample(rawFrame, raw);
+            g_pfTagRead = 0; g_pfFlagsRead = 0;
         } else ++g_profLost;
     }
     f.live = false;
+    f.tag = g_pfTag;
+    f.flags = 0;
+    f.mN = 0; g_fmDraws = 0;
     for (int k = 0; k < PR_COUNT; ++k) f.used[k] = false;
     ctx->Begin(f.dis);
     ctx->End(f.f[0]);
@@ -2609,12 +2746,11 @@ static int ProfText(char* p)
 {
     char* s = p;
     double fps = g_cpuFrameMs > 0 ? 1000.0 / g_cpuFrameMs : 0;
-    double mod = g_gpuMs[PR_COPY] + g_gpuMs[PR_HALF] + g_gpuMs[PR_BLUR] + g_gpuMs[PR_LAMPS] + g_gpuMs[PR_SUN] + g_gpuMs[PR_AIR] + g_gpuMs[PR_LOOK] + g_gpuMs[PR_EARLY] + g_gpuMs[PR_PROBE] +
-                 g_gpuMs[PR_CLOUDS] + g_gpuMs[PR_CSHADOW] + g_gpuMs[PR_SKYDRAW];
+    double mod = ModPassMs(g_gpuMs);
     p += sprintf(p, "FPS %.1f (%.2f ms)   GPU frame %.2f ms   mod GPU %.2f ms   mod CPU %.2f ms\n", fps, g_cpuFrameMs, g_gpuFrameMs, mod, g_cpuModMs);
     p += sprintf(p, "GPU ms:");
     for (int k = 0; k < PR_COUNT; ++k) {
-        if (k == PR_OVERLAY || k == PR_CLOUDS) p += sprintf(p, "\n       ");   // (1.96g: wrapped: the line ran past the menu)
+        if (k == PR_OVERLAY || k == PR_CLOUDS || k == PR_TILES) p += sprintf(p, "\n       ");   // (1.96g: wrapped: the line ran past the menu)
         p += sprintf(p, " %s %.2f%s", kProfNames[k], g_gpuMs[k], k == PR_GAMESUN ? " |" : "");
     }
     p += sprintf(p, "\n");
@@ -2749,6 +2885,7 @@ static void AirPass(ID3D11DeviceContext* ctx)
     ID3D11RasterizerState* sRs = 0; ctx->RSGetState(&sRs);
 
     // draw
+    FmMark(ctx, FM_AIR);   // (1.98h: the frame map)
     ProfMark(ctx, PR_AIR, 0);
     ID3D11ShaderResourceView* noSrv[42] = {};
     ctx->PSSetShaderResources(0, 42, noSrv);          // the scene may be bound as an input right now
@@ -2778,6 +2915,8 @@ static void AirPass(ID3D11DeviceContext* ctx)
                  g_camFrame[cur] == g_frame + 1;   // the lamp finder (the camera is read back with it); not in full day
     bool ssrOn = g_p[P_SSR].v > 0 && g_psSSR && g_psSSRApply && g_blendDual && g_air.normal;
     bool ssrDone = false;
+    bool ssrSharp = false;                     // 1.98: the full-size detail of the sharp reflections (PS_SSRSharp)
+    ID3D11ShaderResourceView* ssrSrc = 0;      // the frame they were read from
     if (g_sceneSrv && g_psSnap && g_hrt[4].rtv && ((g_p[P_BOUNCE].v > 0 && g_p[P_BOUNCE_ALL].v > 0.5f) || lamps || ssrOn) &&
         sd.Width == g_halfW * 2 && sd.Height == g_halfH * 2) {
         ProfMark(ctx, PR_SNAP, 0);
@@ -2800,7 +2939,10 @@ static void AirPass(ID3D11DeviceContext* ctx)
             bool lt = g_lampLFrame == g_frame + 1;
             ID3D11ShaderResourceView* li[5] = { g_tileRT[0].srv, g_tileRT[1].srv, g_lampUseSrv ? g_lampUseSrv : g_lampSrv, g_lsSrv, lt ? g_lampLT.srv : 0 };
             ctx->PSSetShaderResources(31, 5, li);
+            TileCBind(ctx);
             cb.P10[1] = lt ? 1.0f : 0.0f;
+            cb.P15[3] = lt && g_lampSplit ? 1.0f : 0.0f;   // 1.98e: the split's strongest lamps (t42) taken out too
+            ctx->PSSetShaderResources(42, 1, lt ? &g_lampBT.srv : noSrv);
             if (SUCCEEDED(ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &cb, sizeof(cb)); ctx->Unmap(g_cb, 0); }
         }
         if (!lampsOn) { cb.P8[0] = 0; if (SUCCEEDED(ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &cb, sizeof(cb)); ctx->Unmap(g_cb, 0); } }
@@ -2896,11 +3038,14 @@ static void AirPass(ID3D11DeviceContext* ctx)
             sc.P21[0] = pano && g_panoSrv[1] ? 1.0f : 0.0f;
             if (SUCCEEDED(ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &sc, sizeof(sc)); ctx->Unmap(g_cb, 0); }
             {   // 1.46: + the gloss and the ray's length (the smoothing, the history); the sky probe (sky.inc)
-                ID3D11RenderTargetView* srt[2] = { g_ssrRT[0].rtv, g_ssrAux.rtv };
-                ctx->OMSetRenderTargets(2, srt, 0);
+                ssrSharp = g_p[P_SSR_SHARP].v > 0.5f && ssrS < 0.995f && g_psSSRSharp;
+                ssrSrc = early ? g_earlySrv : g_sceneSrv;
+                ID3D11RenderTargetView* srt[3] = { g_ssrRT[0].rtv, g_ssrAux.rtv, g_ssrHit.rtv };   // (1.98: + the hits)
+                ctx->OMSetRenderTargets(ssrSharp ? 3 : 2, srt, 0);
                 ctx->PSSetShaderResources(68, 1, sc.P24[1] > 0.5f ? &g_probeSrv : noSrv);
             }
             oPSSetShader(ctx, g_psSSR, 0, 0);
+            GrassSoftBind(ctx);   // (1.97l: t85 was not bound here: puddles on the lawns)
             Replay(ctx, g_air.dc);
             ctx->PSSetShaderResources(39, 1, noSrv);
             ctx->PSSetShaderResources(67, 2, noSrv);
@@ -2950,6 +3095,34 @@ static void AirPass(ID3D11DeviceContext* ctx)
         ProfMark(ctx, PR_SNAP, 1);
     }
     if (ssrDone) {   // the reflections onto the frame, before the air (they get hazed with everything else)
+        ProfMark(ctx, PR_APPLY, 0);   // (1.98b: timed apart)
+        // 1.98: the sharp ones' detail at full size first (it reads the frame: not while drawing onto it)
+        bool det = false;
+        if (ssrSharp && ssrSrc) {
+            if (g_ssrDetW != sd.Width || g_ssrDetH != sd.Height || !g_ssrDet.srv) {
+                FreeRT(g_ssrDet);
+                g_ssrDetW = g_ssrDetH = 0;
+                if (MakeRT(g_ssrDet, sd.Width, sd.Height, DXGI_FORMAT_R16G16B16A16_FLOAT, false)) { g_ssrDetW = sd.Width; g_ssrDetH = sd.Height; Log("reflections: full-size detail target %ux%u", sd.Width, sd.Height); }
+                else Log("reflections: no full-size detail target");
+            }
+            if (g_ssrDet.rtv) {
+                ctx->OMSetBlendState(0, 0, 0xffffffff);
+                ctx->OMSetRenderTargets(1, &g_ssrDet.rtv, 0);
+                D3D11_VIEWPORT dv = { 0, 0, (float)sd.Width, (float)sd.Height, 0, 1 };
+                ctx->RSSetViewports(1, &dv);
+                ID3D11ShaderResourceView* gbS[4] = { g_air.depth, g_air.normal, g_air.diffuse, g_air.spec };
+                ctx->PSSetShaderResources(17, 4, gbS);
+                ctx->PSSetShaderResources(37, 1, &g_hrt[6].srv);
+                ctx->PSSetShaderResources(39, 1, &ssrSrc);
+                ctx->PSSetShaderResources(88, 1, &g_ssrHit.srv);
+                oPSSetShader(ctx, g_psSSRSharp, 0, 0);
+                Replay(ctx, g_air.dc);
+                ctx->PSSetShaderResources(37, 1, noSrv);
+                ctx->PSSetShaderResources(39, 1, noSrv);
+                ctx->PSSetShaderResources(88, 1, noSrv);
+                det = true;
+            }
+        }
         ctx->OMSetRenderTargets(1, &g_sceneRtv, 0);
         D3D11_VIEWPORT fv = { 0, 0, (float)sd.Width, (float)sd.Height, 0, 1 };
         ctx->RSSetViewports(1, &fv);
@@ -2961,10 +3134,14 @@ static void AirPass(ID3D11DeviceContext* ctx)
         // wetness, the puddles and the roofs' dry patches were placed around the camera, riding with it
         ctx->PSSetShaderResources(28, 1, &g_camRec[cur].srv);
         oPSSetShader(ctx, g_psSSRApply, 0, 0);
+        GrassSoftBind(ctx);
+        ctx->PSSetShaderResources(89, 1, det ? &g_ssrDet.srv : noSrv);
         Replay(ctx, g_air.dc);
+        ctx->PSSetShaderResources(89, 1, noSrv);
         ctx->PSSetShaderResources(36, 1, noSrv);
         ctx->PSSetShaderResources(28, 1, noSrv);
         ctx->PSSetShaderResources(16, 10, in);
+        ProfMark(ctx, PR_APPLY, 1);
     }
     bool drawAir = g_view == 0 || g_view == 1 || g_view == 19 || g_view == 20 || g_view == 24;
     ctx->OMSetRenderTargets(1, &g_sceneRtv, 0);
@@ -2980,8 +3157,10 @@ static void AirPass(ID3D11DeviceContext* ctx)
             if (SUCCEEDED(ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &cb, sizeof(cb)); ctx->Unmap(g_cb, 0); }
         }
         ctx->PSSetShaderResources(41, 1, glowOk ? &g_lampGT.srv : noSrv);
+        ProfMark(ctx, PR_AIRPS, 0);   // (1.98b: timed apart)
         oPSSetShader(ctx, g_psAir, 0, 0);
         Replay(ctx, g_air.dc);
+        ProfMark(ctx, PR_AIRPS, 1);
     }
     if (drawAir) { RainfallDraw(ctx, cur, g_air.depth); LensDraw(ctx); }   // 1.83: rain falling; 1.84: on the lens (rainfall.inc)
     if (g_view == 24 && g_psEditor && g_cbLamp && g_camFrame[cur] == g_frame + 1) {
@@ -3142,6 +3321,8 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
         for (int j = 0; j < 3; ++j) { cb.P18[j] = g_sunOurs[j]; cb.P19[j] = g_sunCol[j]; }   // our sun (SunPath)
         cb.P18[3] = g_sunW; cb.P19[3] = g_sunActive ? 1.0f : 0.0f;
         cb.P20[0] = g_sunG; cb.P20[1] = g_sunMoonMaps ? 1.0f : 0.0f; cb.P20[2] = g_skyLum; cb.P20[3] = g_p[P_SSR_RAY].v;
+        cb.P34[0] = g_p[266].v;   // 1.98f: PerfTest
+        cb.P34[1] = g_p[269].v;   // 1.98v: SkyOvercastLight
         cb.P21[1] = g_p[P_WET_OTHER].v;
         cb.P21[3] = g_p[P_NOISE + 3].v;
         cb.P22[0] = g_p[P_NOISE + 5].v; cb.P22[1] = g_p[P_NOISE + 4].v; cb.P22[2] = g_p[P_NOISE + 1].v; cb.P22[3] = g_p[P_NOISE].v;
@@ -3149,6 +3330,7 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
         cb.P24[0] = g_p[P_NOISE + 8].v;   // 1.46: the history's clip; the sky probe drawn of late (sky.inc)
         cb.P25[0] = g_p[188].v; cb.P25[1] = g_p[189].v; cb.P25[2] = g_p[190].v;   // 1.66: the AO options
         cb.P25[3] = g_p[257].v;   // 1.96g: SsrEdges
+        cb.P23[3] = g_p[258].v; cb.P29[3] = g_p[259].v;   // 1.96j: LampTileDepth, LampShadowMin
         cb.P26[0] = g_p[191].v; cb.P26[1] = g_p[192].v; cb.P26[2] = g_p[193].v; cb.P26[3] = g_p[194].v;   // 1.67: the reflected sky
         cb.P27[0] = g_p[197].v; cb.P27[1] = g_p[198].v; cb.P27[2] = g_p[199].v;   // 1.70: car paint
         cb.P27[3] = g_p[200].v;   // 1.73: rain drops on the player's car
@@ -3215,6 +3397,7 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
             ctx->RSGetViewports(&nvp, svp);
             D3D11_VIEWPORT hv = { 0, 0, (float)g_halfW, (float)g_halfH, 0, 1 };
             ProfMark(ctx, PR_HALF, 0);
+            ProfMark(ctx, PR_TILES, 0);   // (1.98b: timed apart)
             if (imm && g_psCam) {   // this frame's camera, for the next frame (bounce, lamps)
                 D3D11_VIEWPORT cv = { 0, 0, 4, 2, 0, 1 };
                 ctx->OMSetRenderTargets(1, &g_camRec[cur].rtv, 0);
@@ -3256,21 +3439,37 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
                 }
                 // which lamps light which screen tile, with this frame's camera
                 if (g_lampUse > 0 && g_psTiles && g_lampSrv && EnsureTiles(g_rtW, g_rtH)) {
-                    ID3D11RenderTargetView* tr[2] = { g_tileRT[0].rtv, g_tileRT[1].rtv };
-                    ctx->OMSetRenderTargets(2, tr, 0);
+                    ID3D11ShaderResourceView* nt[4] = {};
+                    ctx->PSSetShaderResources(81, 4, nt);
+                    ctx->PSSetShaderResources(90, 1, nt);
+                    // 1.98f: the depth cut's ranges in 8 x 8 blocks first (PS_TileZ), then each tile reads 4 x 4 of them
+                    if (cb.P23[3] > 0.5f && g_psTileZ) {
+                        ctx->OMSetRenderTargets(1, &g_tileZ.rtv, 0);
+                        D3D11_VIEWPORT zv = { 0, 0, (float)(g_tileW * 4), (float)(g_tileH * 4), 0, 1 };
+                        ctx->RSSetViewports(1, &zv);
+                        oPSSetShader(ctx, g_psTileZ, 0, 0);
+                        Replay(ctx, dc);
+                    }
+                    ID3D11RenderTargetView* tr[6] = { g_tileRT[0].rtv, g_tileRT[1].rtv, g_tileRT[2].rtv, g_tileRT[3].rtv,
+                                                      g_tileRT[4].rtv, g_tileRT[5].rtv };   // (1.96j: + the depth-cut set, 1.96k: + the glow's)
+                    ctx->OMSetRenderTargets(6, tr, 0);
                     D3D11_VIEWPORT tv = { 0, 0, (float)g_tileW, (float)g_tileH, 0, 1 };
                     ctx->RSSetViewports(1, &tv);
                     ctx->PSSetShaderResources(28, 1, &g_camRec[cur].srv);
                     ctx->PSSetShaderResources(33, 1, g_lampUseSrv ? &g_lampUseSrv : &g_lampSrv);
+                    ctx->PSSetShaderResources(90, 1, &g_tileZ.srv);
                     oPSSetShader(ctx, g_psTiles, 0, 0);
                     Replay(ctx, dc);
+                    ctx->PSSetShaderResources(90, 1, nt);
                     g_tileFrame = g_frame + 1;
                 }
             }
+            ProfMark(ctx, PR_TILES, 1);
             ssOk = SsMaskPass(ctx, dc, prevCam ? g_camRec[last].srv : 0);   // our sun shadows' mask (sunshadow.inc)
             ID3D11ShaderResourceView* prevIn[3] = { prevCam ? g_camRec[last].srv : 0, prevRad ? g_hrt[4].srv : 0,
                                                     hist ? g_hrt[2 + last].srv : 0 };
             ctx->PSSetShaderResources(28, 3, prevIn);
+            ProfMark(ctx, PR_AO, 0);   // (1.98b: timed apart)
             ID3D11RenderTargetView* hr[2] = { g_hrt[0].rtv, g_hrt[1].rtv };
             ctx->OMSetRenderTargets(2, hr, 0);
             ctx->RSSetViewports(1, &hv);
@@ -3291,6 +3490,7 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
                 ctx->PSSetShaderResources(71, 1, none);
                 g_aoFrame[cur] = g_frame + 1;
             }
+            ProfMark(ctx, PR_AO, 1);
             ProfMark(ctx, PR_HALF, 1);
             if (bounce) {
                 ProfMark(ctx, PR_BLUR, 0);
@@ -3306,7 +3506,8 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
             // lamp light alone, at the shown resolution (a game rendering wider for SSAA gets it at half the cost)
             if (g_lampUse > 0 && g_psLamps && g_tileFrame == g_frame + 1 && g_camFrame[cur] == g_frame + 1) {
                 UINT lw = g_bbW && g_bbW < g_rtW ? g_bbW : g_rtW, lh = g_bbH && g_bbH < g_rtH ? g_bbH : g_rtH;
-                if (g_p[P_LAMP_RES].v > 0.5f) { lw = (lw + 1) / 2; lh = (lh + 1) / 2; }
+                bool split = g_p[P_LAMP_RES].v > 0.5f;
+                if (split) { lw = (lw + 1) / 2; lh = (lh + 1) / 2; }
                 if (EnsureLampLT(lw, lh)) {
                     ProfMark(ctx, PR_LAMPS, 0);
                     LightCB lcb = cb;
@@ -3314,6 +3515,8 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
                     lcb.P9[3] = g_p[P_LAMP_SHADOW_MAPS].v > 0.5f && g_lsSrv ? g_p[P_LAMP_SIZE].v : 0.0f;
                     bool hl = HlReady();
                     lcb.P15[0] = hl ? g_p[P_HL_BEAM].v : 0.0f; lcb.P15[1] = hl && g_hlShadow ? 1.0f : 0.0f; lcb.P15[2] = g_p[P_HL_LEN].v;
+                    lcb.P15[3] = split ? 1.0f : 0.0f;
+                    g_lampSplit = split;
                     HlBind(ctx, hl);
                     if (SUCCEEDED(ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &lcb, sizeof(lcb)); ctx->Unmap(g_cb, 0); }
                     ID3D11RenderTargetView* lt2[3] = { g_lampLT.rtv, g_lampGT.rtv, g_lampBT.rtv };
@@ -3323,6 +3526,7 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
                     ctx->PSSetShaderResources(28, 1, &g_camRec[cur].srv);
                     ID3D11ShaderResourceView* li[4] = { g_tileRT[0].srv, g_tileRT[1].srv, g_lampUseSrv ? g_lampUseSrv : g_lampSrv, g_lsSrv };
                     ctx->PSSetShaderResources(31, 4, li);
+                    TileCBind(ctx);
                     oPSSetShader(ctx, g_psLamps, 0, 0);
                     Replay(ctx, dc);
                     ctx->PSSetShaderResources(28, 1, none);
@@ -3338,7 +3542,9 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
             cb.P5[3] = 1;
         }
         if (!bounce) cb.P6[0] = 0;
-        cb.P10[2] = ssOk ? 1.0f : 0.0f;   // our sun shadows' mask bound (t58, t59)
+        cb.P14[3] = ssOk ? 1.0f : 0.0f;   // our sun shadows' mask bound (t58, t59) (1.98e: was P10[2], the lamps' width below)
+        if (imm && g_pfStarted)   // 1.98d: the pass profile: the states that make the sun pass dearer
+            g_pf[g_pfIdx].flags |= (ssOk ? 0u : 1u) | (half ? 0u : 2u) | (g_lampUse > 0 && g_tileFrame != g_frame + 1 ? 4u : 0u);
         // 2) full resolution: lighting, shadows (and the air when it cannot be drawn later)
         if (SUCCEEDED(ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &cb, sizeof(cb)); ctx->Unmap(g_cb, 0); }
         if (fast) {
@@ -3350,8 +3556,10 @@ static void SunPassLocked(ID3D11DeviceContext* ctx, SunInfo* s, const DrawCall& 
             bool lt = g_lampLFrame == g_frame + 1;
             ID3D11ShaderResourceView* li[5] = { g_tileRT[0].srv, g_tileRT[1].srv, g_lampUseSrv ? g_lampUseSrv : g_lampSrv, g_lsSrv, lt ? g_lampLT.srv : 0 };
             ctx->PSSetShaderResources(31, 5, li);
+            TileCBind(ctx);
             cb.P10[1] = lt ? 1.0f : 0.0f;
             cb.P10[2] = (float)g_lampLW; cb.P10[3] = (float)g_lampLH;
+            cb.P15[3] = lt && g_lampSplit ? 1.0f : 0.0f;
             ID3D11ShaderResourceView* gbt[2] = { lt ? g_lampGT.srv : 0, lt ? g_lampBT.srv : 0 };
             ctx->PSSetShaderResources(41, 2, gbt);
             if (SUCCEEDED(ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &cb, sizeof(cb)); ctx->Unmap(g_cb, 0); }
@@ -3431,6 +3639,7 @@ static void TxNotePs(const void* code, SIZE_T size, ID3D11PixelShader* ps);   //
 static void MatNotePs(const void* code, SIZE_T size, ID3D11PixelShader* ps);  // matpom.inc
 static ID3D11PixelShader* MatSubstitute(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps);
 static void BldNotePs(const void* code, SIZE_T size, ID3D11PixelShader* ps);  // matheight.inc
+static void GrassNotePs(const void* code, SIZE_T size, ID3D11PixelShader* ps);  // grass.inc
 static ID3D11PixelShader* BldSubstitute(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps);
 #include "hitch.inc"   // 1.81d: where a long frame's time went
 static HRESULT STDMETHODCALLTYPE HkCreatePS(ID3D11Device* dev, const void* code, SIZE_T size, ID3D11ClassLinkage* cl, ID3D11PixelShader** out)
@@ -3442,7 +3651,7 @@ static HRESULT STDMETHODCALLTYPE HkCreatePS(ID3D11Device* dev, const void* code,
     if (!tried) { tried = true; if (!LoadCompiler()) Log("no shader compiler: NewLook stays off"); }
     if (SUCCEEDED(hr) && out && *out && code && g_reflect) { ExamineShader(code, size, *out); NameShader(code, size, *out); TxNotePs(code, size, *out); CoronaNote(code, size, *out); SkyReflNote(code, size, *out); }
     if (SUCCEEDED(hr) && out && *out && code) FlareNote(code, size, *out, false);   // the game's sun flare (sunshadow.inc)
-    if (SUCCEEDED(hr) && out && *out && code) { MatNotePs(code, size, *out); BldNotePs(code, size, *out); }
+    if (SUCCEEDED(hr) && out && *out && code) { MatNotePs(code, size, *out); BldNotePs(code, size, *out); GrassNotePs(code, size, *out); }
     if (SUCCEEDED(hr) && out && *out && code && PsDiscards(code, size)) {
         unsigned h = ((unsigned)(size_t)*out >> 4) * 2654435761u;
         for (int k = 0; k < 64; ++k) if (!InterlockedCompareExchangePointer((PVOID volatile*)&g_psCut[(h + k) & 4095], *out, 0)) break;
@@ -3465,7 +3674,10 @@ static void STDMETHODCALLTYPE HkPSSetShader(ID3D11DeviceContext* ctx, ID3D11Pixe
     if (s && g_frame > 300) g_tracing = 1;
     if (g_tracing) Trace(s ? "PSSetShader SUN" : "PSSetShader", ctx, ps);
     ID3D11PixelShader* use = BldSubstitute(ctx, MatSubstitute(ctx, ps));   // game material shaders with parallax (matpom.inc, matheight.inc)
-    oPSSetShader(ctx, SkySubstitute(ctx, g_lightPSN ? HlSubstitute(ctx, use) : use), ci, n);   // the headlights: ours with a soft shadow
+    ID3D11PixelShader* hs = g_lightPSN ? HlSubstitute(ctx, use) : use;   // the headlights: ours with a soft shadow
+    ID3D11PixelShader* fin = SkySubstitute(ctx, hs);
+    if (Immediate(ctx)) g_skyOursBound = fin != hs;   // (1.98g: counted)
+    oPSSetShader(ctx, fin, ci, n);
 }
 
 // 1.65: asked ~15 times a game draw: the game's immediate context known by its pointer (HookDevice), others asked
@@ -3609,9 +3821,120 @@ static bool MainTarget(ID3D11DeviceContext* ctx)
 #include "wind.inc"   // 1.87 (preparation)
 #include "matpom.inc"
 #include "matheight.inc"
+#include "grass.inc"   // 1.97: grass on the lawns
 
 // before a draw: start the timer of the game's own main sun-pass draw
 // the game's exposure: a tone-mapping shader reads a 1x1 texture (w = the exposure); copied into ours once a frame
+// 1.98q: the game's eye adaptation weakened: its 1x1 exposure (all 4 channels) read back 2 frames late (never waiting),
+// a slow average of it kept (log space, ~20 s), and before its tone mapping the texture set to avg x (game / avg)^s,
+// s = EyeAdapt (1: the game's as it is). It brightened the street by a lot within 2 s when the sky left the view (the
+// user: "a sunset", 2026-10-26)
+static ID3D11Texture2D* g_eaStage[3];
+static unsigned g_eaStageFrame[3];
+static double g_eaRef[4];
+static float g_eaGame[4];
+// 1.98aa: the game's own value put back after its tone mapping: its adaptation goes on from its texture, so ours left in
+// it was fed back (the game chased it: the brightness jerked at EyeAdapt 0.3, the user)
+static ID3D11Texture2D* g_eaSave;
+static ID3D11Texture2D* g_eaRestore;
+// 1.98ab: the game's value as read: the median of the last 5 reads, then smoothed (~0.25 s, log space): some reads were
+// off by up to 7 x for a frame (1.6, 11.5, 1.65: its own adaptation never moves so fast) and went straight into ours: the
+// screen flickered dark / bright many times a second at EyeAdapt 0.3 (the user)
+static float g_eaHist[4][5];
+static int g_eaHistN;
+static double g_eaSm[4];
+static bool g_eaHave;
+static DWORD g_eaT;
+static void ExpoAdapt(ID3D11DeviceContext* ctx, ID3D11Texture2D* t, const D3D11_TEXTURE2D_DESC& td)
+{
+    // (1.98r: its texture is typeless (format 9): 1.98q took float formats only and did nothing)
+    int fv = (int)td.Format;
+    bool f32 = fv >= 1 && fv <= 2, f16 = fv >= 9 && fv <= 10;
+    float s = g_p[P_EYE_ADAPT].v;
+    static bool logged;
+    if (!logged) { logged = true; Log("eye adaptation: the game's exposure texture format %d (%s)", fv, f32 || f16 ? "weakened by EyeAdapt" : "unknown: left alone"); }
+    if ((!f32 && !f16) || !g_enabled || s >= 0.999f) { g_eaHave = false; return; }
+    int k = g_frame % 3;
+    // the oldest copy (2 frames ago): the game's value then
+    if (g_eaStage[k] && g_eaStageFrame[k] && g_frame + 1 - g_eaStageFrame[k] >= 2) {
+        D3D11_MAPPED_SUBRESOURCE m;
+        if (ctx->Map(g_eaStage[k], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m) == S_OK) {
+            float v[4];
+            for (int c = 0; c < 4; ++c) v[c] = f32 ? ((const float*)m.pData)[c] : HalfToFloat(((const unsigned short*)m.pData)[c]);
+            ctx->Unmap(g_eaStage[k], 0);
+            g_eaStageFrame[k] = 0;
+            DWORD now = GetTickCount();
+            float dt = g_eaHave ? (now - g_eaT) / 1000.0f : 0;
+            g_eaT = now;
+            float a = 1 - expf(-(dt > 0.5f ? 0.5f : dt) / 20.0f);
+            float as = 1 - expf(-(dt > 0.5f ? 0.5f : dt) / 0.25f);
+            int hn = g_eaHave ? (g_eaHistN < 5 ? g_eaHistN + 1 : 5) : 1;
+            for (int c = 0; c < 4; ++c) {
+                if (!(v[c] > 1e-6f && v[c] < 1e6f)) { if (!g_eaHave) g_eaGame[c] = 0; continue; }
+                float* h = g_eaHist[c];
+                if (!g_eaHave) for (int q = 0; q < 5; ++q) h[q] = v[c];
+                for (int q = 4; q > 0; --q) h[q] = h[q - 1];
+                h[0] = v[c];
+                float srt[5];
+                memcpy(srt, h, sizeof(srt));
+                for (int p = 1; p < hn; ++p) for (int q = p; q > 0 && srt[q] < srt[q - 1]; --q) { float x = srt[q]; srt[q] = srt[q - 1]; srt[q - 1] = x; }
+                double l = log(srt[hn / 2] > 1e-6f ? srt[hn / 2] : v[c]);
+                g_eaSm[c] = g_eaHave ? g_eaSm[c] + (l - g_eaSm[c]) * as : l;
+                g_eaGame[c] = (float)exp(g_eaSm[c]);
+                g_eaRef[c] = g_eaHave ? g_eaRef[c] + (g_eaSm[c] - g_eaRef[c]) * a : g_eaSm[c];
+            }
+            g_eaHistN = hn;
+            g_eaHave = true;
+            if (g_frame % 600 < 3) Log("eye adaptation: the game's %.3f (read %.3f), the average %.3f, ours x %.2f", g_eaGame[3], v[3],
+                                       exp(g_eaRef[3]), g_eaGame[3] > 0 ? powf((float)(g_eaGame[3] / exp(g_eaRef[3])), s - 1) : 1.0f);
+            static unsigned odd;
+            if (v[3] > 0 && g_eaGame[3] > 0 && (v[3] > g_eaGame[3] * 2 || v[3] < g_eaGame[3] * 0.5f) && odd++ < 20)
+                Log("eye adaptation: an odd read %.3f (the median %.3f): left out", v[3], g_eaGame[3]);
+        }
+    }
+    // this frame's game value copied (before it is changed), then ours put in
+    if (!g_eaStage[k]) {
+        D3D11_TEXTURE2D_DESC sd = td;
+        sd.Usage = D3D11_USAGE_STAGING; sd.BindFlags = 0; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; sd.MiscFlags = 0; sd.MipLevels = 1;
+        if (FAILED(g_dev->CreateTexture2D(&sd, 0, &g_eaStage[k]))) g_eaStage[k] = 0;
+    }
+    if (g_eaStage[k] && !g_eaStageFrame[k]) {
+        ctx->CopySubresourceRegion(g_eaStage[k], 0, 0, 0, 0, t, 0, 0);
+        g_eaStageFrame[k] = g_frame + 1;
+    }
+    if (!g_eaHave) return;
+    // ours: avg x (game / avg)^s (the game's value: the latest read, 2 frames old: its adaptation takes ~2 s)
+    float out[4];
+    for (int c = 0; c < 4; ++c) {
+        float avg = (float)exp(g_eaRef[c]);
+        out[c] = g_eaGame[c] > 0 ? avg * powf(g_eaGame[c] / avg, s) : g_eaGame[c];   // (1.98s: its unused channels (0) left 0, not 1)
+    }
+    const void* data;
+    unsigned short hv[4];
+    if (f16) {
+        for (int c = 0; c < 4; ++c) {   // (float -> half: normal range only)
+            float x = out[c];
+            unsigned u; memcpy(&u, &x, 4);
+            int e = (int)((u >> 23) & 255) - 127 + 15;
+            hv[c] = e <= 0 ? 0 : e >= 31 ? 0x7BFF : (unsigned short)(((u >> 16) & 0x8000) | (e << 10) | ((u >> 13) & 1023));
+        }
+        data = hv;
+    } else data = out;
+    if (!g_eaSave) {
+        D3D11_TEXTURE2D_DESC sd = td;
+        sd.Usage = D3D11_USAGE_DEFAULT; sd.BindFlags = 0; sd.CPUAccessFlags = 0; sd.MiscFlags = 0;
+        if (FAILED(g_dev->CreateTexture2D(&sd, 0, &g_eaSave))) g_eaSave = 0;
+    }
+    if (!g_eaSave) return;   // (without a place to keep the game's value: left alone rather than fed back)
+    ctx->CopyResource(g_eaSave, t);
+    g_eaRestore = t;
+    if (oUpdSub) oUpdSub(ctx, t, 0, 0, data, 16, 16); else ctx->UpdateSubresource(t, 0, 0, data, 16, 16);
+}
+static void ExpoRestore(ID3D11DeviceContext* ctx)   // (after the tone-mapping draw)
+{
+    if (g_eaRestore && g_eaSave) ctx->CopyResource(g_eaRestore, g_eaSave);
+    g_eaRestore = 0;
+}
 static void ExpoGrab(ID3D11DeviceContext* ctx)
 {
     if (!g_lastPS || g_expoFrame == g_frame) return;
@@ -3631,6 +3954,7 @@ static void ExpoGrab(ID3D11DeviceContext* ctx)
             if (td.Width == 1 && td.Height == 1 && td.ArraySize == 1 && td.SampleDesc.Count == 1 && g_expoFrame != g_frame) {
                 // a debug view: the game's exposure held at 1 (1.13): its eye adaptation would chase the debug picture (it
                 // brightened and dimmed by itself), and the picture is shown as its values are
+                if (g_view == 0 || g_view == 1 || g_view == 24) ExpoAdapt(ctx, t, td);   // 1.98q
                 if (g_view != 0 && g_view != 1 && g_view != 24) {
                     unsigned short h1[4] = { 0x3C00, 0x3C00, 0x3C00, 0x3C00 };
                     float f1[4] = { 1, 1, 1, 1 };
@@ -3686,7 +4010,12 @@ static void ExpoGrab(ID3D11DeviceContext* ctx)
 }
 
 // our sun shadow maps (sunshadow.inc): a shadow draw of the game's drawn into ours first; true: the game's own left out
-static bool SsBeforeGameDraw(ID3D11DeviceContext* ctx, const DrawCall& d) { return g_enabled && Immediate(ctx) && SsAfterDraw(ctx, d); }
+static bool SsBeforeGameDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
+{
+    if (!g_enabled || !Immediate(ctx)) return false;
+    HsScope hs(HS_SS);   // (1.98g: timed)
+    return SsAfterDraw(ctx, d);
+}
 
 // 1.26: who else reads the game's sun shadow map (SkipGameShadows leaves it empty where ours are read): for 30 frames every
 // 3600, each draw outside the game's sun pass looks at its pixel-shader textures; logged
@@ -3798,14 +4127,19 @@ static bool BeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     if (g_earlyArm == g_frame + 1 && g_earlyFrame != g_frame + 1 && Immediate(ctx)) EarlyCopyCheck(ctx, d);
     if (g_coronaN && Immediate(ctx)) CoronaBefore(ctx);   // the game's sun corona at our sun (sunshadow.inc)
     if (g_srN && Immediate(ctx)) SkyReflBefore(ctx);      // 1.94: its materials' reflections in our sky's colour (skyrefl.inc)
+    if (g_klN && Immediate(ctx)) KlBefore(ctx);           // 1.98m: its glass's sun glint under our clouds (skyrefl.inc)
+    if (g_crN && Immediate(ctx)) CrBefore(ctx);           // 1.98n: the cars' cube map: our sky probe (skyrefl.inc)
+    if (g_gfN && Immediate(ctx)) GfBefore(ctx);           // 1.98t: its fog's gradient grey under a thick deck (skyrefl.inc)
     if (g_enabled && Immediate(ctx)) WindBeforeDraw(ctx);   // 1.87: the wind in the leaves (wind.inc)
     if (g_flareN && Immediate(ctx)) FlareBefore(ctx);     // its flare too
     HlScaleBegin(ctx);
     if (Immediate(ctx)) ExpoGrab(ctx);                            // the game's exposure, for the debug views
-    if (g_skyPending && Immediate(ctx)) SkyBeforeDraw(ctx, d);   // our clouds, before the sky draw (sky.inc)
+    if (g_skyPending && Immediate(ctx)) { HsScope hs(HS_SKY); SkyBeforeDraw(ctx, d); }   // our clouds, before the sky draw (sky.inc)
     if (Immediate(ctx)) GameWetBefore(ctx);                       // the game's puddle map, scaled or none (gamewet.inc)
     if (g_bldBound && Immediate(ctx)) BldBeforeDraw(ctx);          // a building's height map (matheight.inc)
+    if (g_terrN && g_grassMaskFrame == g_frame + 1 && g_grassSunFrame != g_frame + 1 && *CurSlot(ctx) && Immediate(ctx) && MainTarget(ctx)) GrassBeforeSun(ctx, d);   // (1.97e: the main sun draw: not a reflection's before the G-buffer is done)   // 1.97 (grass.inc)
     if (!g_pfStarted || !*CurSlot(ctx) || !Immediate(ctx) || !MainTarget(ctx)) return false;
+    FmMark(ctx, FM_LIGHT);   // (1.98h: the frame map)
     ProfMark(ctx, PR_GAMESUN, 0);
     return true;
 }
@@ -3816,28 +4150,40 @@ static void AfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d, bool timed)
     WindAfterDraw(ctx);   // 1.87: our GS off after a leaves' draw (wind.inc)
     if (g_coronaPsSlot >= 0 || g_coronaVsSlot >= 0) CoronaAfter(ctx);
     if (g_srSlot >= 0) SkyReflAfter(ctx);
+    if (g_klSlot >= 0) KlAfter(ctx);
+    if (g_crSlot >= 0) CrAfter(ctx);
+    if (g_gfSlot >= 0) GfAfter(ctx);
+    if (g_eaRestore && Immediate(ctx)) ExpoRestore(ctx);   // 1.98aa
     if (g_flareOn) FlareAfter(ctx);
     if (Immediate(ctx)) GameWetAfter(ctx);
     HlScaleEnd(ctx);
     if (timed) ProfMark(ctx, PR_GAMESUN, 1);
     if (g_frameTrace == 2 && Immediate(ctx)) TraceDraw(ctx, d);
     if (g_recon == 2 && Immediate(ctx)) ReconDraw(ctx, d);
-    if (g_enabled && g_lampUse > 0 && Immediate(ctx)) LsAfterDraw(ctx, d);
-    if (g_enabled && Immediate(ctx)) { RainAfterDraw(ctx, d); RainPlayerAfterDraw(ctx, d); }   // the rain map, the player's car (rain.inc)
+    if (g_enabled && g_lampUse > 0 && Immediate(ctx)) { HsScope hs(HS_LS); LsAfterDraw(ctx, d); }
+    if (g_enabled && Immediate(ctx)) { HsScope hs(HS_RAIN); RainAfterDraw(ctx, d); RainPlayerAfterDraw(ctx, d); }   // the rain map, the player's car (rain.inc)
     if (g_pickReq == 2 && Immediate(ctx)) TxPickAfterDraw(ctx, d);   // the texture picker (texreplace.inc)
+    if (g_terrN && Immediate(ctx)) GrassAfterDraw(ctx, d);   // 1.97: the lawns' grass mask (grass.inc)
     if (g_enabled && g_p[P_SS_SKIP].v > 0.5f && Immediate(ctx)) GameShadowReaders(ctx);
-    if (g_enabled && Immediate(ctx) && IsFinalPS(g_lastPS)) GradePass(ctx);
+    if (Immediate(ctx) && IsFinalPS(g_lastPS)) {
+        static unsigned fmFinal;   // (1.98h: the frame map, once a frame)
+        if (fmFinal != g_frame + 1) { fmFinal = g_frame + 1; FmMark(ctx, FM_FINAL); }
+        if (g_enabled) { HsScope hs(HS_GRADE); GradePass(ctx); }
+    }
     if (g_enabled && Immediate(ctx) && g_lightPSN) HlAfterDraw(ctx);
-    if (g_enabled && Immediate(ctx)) CarAfterDraw(ctx, d);
+    if (g_enabled && Immediate(ctx)) { HsScope hs(HS_CAR); CarAfterDraw(ctx, d); }
+    if (g_skyOursBound && Immediate(ctx)) ++g_skyDrawN;   // (1.98g)
     if (g_skyDrawLog && Immediate(ctx)) SkyAfterDraw(ctx);
     if (g_obPhase == OB_QUERY || g_obPhase == OB_CB) ObAfterDraw(ctx, d);
     if (g_tplCount && g_p[P_AUTO_LAMPS].v > 0.5f) AutoAfterDraw(ctx, d);
     InterlockedIncrement(&g_drawCnt[d.kind]);
+    InterlockedIncrement(&g_hsDraws);
+    if (Immediate(ctx)) ++g_fmDraws;   // (1.98h: the frame map)
     if (g_tracing) { static const char* n[] = { "Draw", "DrawIndexed", "DrawInstanced", "DrawIndexedInstanced" }; Trace(n[d.kind], ctx, (void*)(size_t)d.a); }
     SunInfo* s = *CurSlot(ctx);
     if (!s) return;
     InterlockedIncrement(Immediate(ctx) ? &g_sunDrawsImm : &g_sunDrawsDef);
-    if (g_enabled && SecSunPass()) { SunPass(ctx, s, d); if (Immediate(ctx)) g_earlyArm = g_frame + 1; }   // (1.96b: a section in it on)
+    if (g_enabled && SecSunPass()) { HsScope hs(HS_SUN); SunPass(ctx, s, d); if (Immediate(ctx)) g_earlyArm = g_frame + 1; }   // (1.96b: a section in it on)
 }
 
 static void STDMETHODCALLTYPE HkDraw(ID3D11DeviceContext* ctx, UINT count, UINT start)
@@ -3848,7 +4194,7 @@ static void STDMETHODCALLTYPE HkDraw(ID3D11DeviceContext* ctx, UINT count, UINT 
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
     bool timed = BeforeDraw(ctx, d);
-    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) HT_CALL(ht, oDraw(ctx, count, start));
+    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx) && !KlVfxSkip(ctx)) HT_CALL(ht, oDraw(ctx, count, start));
     AfterDraw(ctx, d, timed);
     if (g_cbsOn) { unsigned long long cf = g_weCopyFrom; WeEnd(ctx, d, we); g_weCopyFrom = cf; if (cf) WeCopiesDraw(ctx, d); }
 }
@@ -3862,7 +4208,7 @@ static void STDMETHODCALLTYPE HkDrawIndexed(ID3D11DeviceContext* ctx, UINT count
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
     if (we == WE_SPLIT) { WeSplitDraw(ctx, d); return; }
     bool timed = BeforeDraw(ctx, d);
-    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) HT_CALL(ht, oDrawIndexed(ctx, count, start, base));
+    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx) && !KlVfxSkip(ctx)) HT_CALL(ht, oDrawIndexed(ctx, count, start, base));
     AfterDraw(ctx, d, timed);
     if (g_cbsOn) { unsigned long long cf = g_weCopyFrom; WeEnd(ctx, d, we); g_weCopyFrom = cf; if (cf) WeCopiesDraw(ctx, d); }
 }
@@ -3875,7 +4221,7 @@ static void STDMETHODCALLTYPE HkDrawInstanced(ID3D11DeviceContext* ctx, UINT cou
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
     bool timed = BeforeDraw(ctx, d);
-    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) HT_CALL(ht, oDrawInstanced(ctx, count, inst, start, startInst));
+    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx) && !KlVfxSkip(ctx)) HT_CALL(ht, oDrawInstanced(ctx, count, inst, start, startInst));
     AfterDraw(ctx, d, timed);
     if (g_cbsOn) { unsigned long long cf = g_weCopyFrom; WeEnd(ctx, d, we); g_weCopyFrom = cf; if (cf) WeCopiesDraw(ctx, d); }
 }
@@ -3888,7 +4234,7 @@ static void STDMETHODCALLTYPE HkDrawIndexedInstanced(ID3D11DeviceContext* ctx, U
     int we = g_cbsOn ? WeBefore(ctx, d) : WE_DRAW;   // the world editor: hidden / moved objects
     if (we == WE_SKIP) { if (g_weCopyFrom) WeCopiesDraw(ctx, d); return; }
     bool timed = BeforeDraw(ctx, d);
-    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx)) HT_CALL(ht, oDrawIndexedInstanced(ctx, count, inst, start, base, startInst));
+    if (!SsBeforeGameDraw(ctx, d) && !SunSpriteSkip(ctx) && !KlVfxSkip(ctx)) HT_CALL(ht, oDrawIndexedInstanced(ctx, count, inst, start, base, startInst));
     AfterDraw(ctx, d, timed);
     if (g_cbsOn) { unsigned long long cf = g_weCopyFrom; WeEnd(ctx, d, we); g_weCopyFrom = cf; if (cf) WeCopiesDraw(ctx, d); }
 }
@@ -4111,14 +4457,17 @@ static void Keys()
     bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     bool changed = false;
     if (!(GetAsyncKeyState(VK_CONTROL) & 0x8000) && Pressed('Y', false)) { g_enabled = !g_enabled; changed = true; Log("NewLook %s", g_enabled ? "on" : "off"); }
-    // bench (bench.inc): Ctrl+B the quick one (sections, day / night / rain); Shift+B the selected setting; B (with or
-    // without them) stops a run. (1.96b: B alone left to the game; the old run over every effect taken off the keys)
+    // bench (bench.inc): Ctrl+B the quick one (sections, day / night / rain); Shift+B the selected setting; Ctrl+Shift+B
+    // the pass profile (1.98b); B (with or without them) stops a run. (1.96b: B alone left to the game; the old run over
+    // every effect taken off the keys)
     {
-        bool ctl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0, running = g_benchPhase >= 0 || g_qbPhase >= 0;
-        if ((running || ctl != shift) && !(shift && g_view == 24) && Pressed('B', false)) {
+        bool ctl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0, running = g_benchPhase >= 0 || g_qbPhase >= 0 || g_ppPhase >= 0;
+        if ((running || ctl || shift) && !(shift && g_view == 24) && Pressed('B', false)) {
             if (g_benchPhase >= 0) BenchStop();
             else if (g_qbPhase >= 0) QbStop("stopped");
+            else if (g_ppPhase >= 0) PpStop("stopped");
             else if (g_viewPicker || g_view == 24) {}
+            else if (ctl && shift) PpStart();
             else if (ctl) QbStart();
             else BenchStart(false, SelIdx());
             changed = true;
@@ -4127,7 +4476,7 @@ static void Keys()
     if (Pressed('X', false) && shift && !g_pickReq) { g_pickReq = 1; strcpy(g_lampMsg, "texture pick: the material at the screen centre..."); changed = true; }
     if (Pressed('T', false) && shift) { g_recon = 1; strcpy(g_lampMsg, "shadow research: one frame logged (recon: lines)"); changed = true; }
     if (Pressed('U', false)) {
-        if (shift) { g_captureReq = 1; g_frameTrace = 1; Log("capture requested"); }
+        if (shift) { g_captureReq = 1; g_frameTrace = 1; g_crDumpReq = 1; Log("capture requested"); }
         else { g_viewPicker = !g_viewPicker; changed = true; }
     }
     if (g_viewPicker) {   // the view list takes I/O (the view changes at once)
@@ -4343,7 +4692,11 @@ static HRESULT STDMETHODCALLTYPE HkPresent(IDXGISwapChain* sc, UINT sync, UINT f
             pt, g_profLost, (unsigned)(ms.ullAvailVirtual >> 20), (unsigned)(ms.ullTotalVirtual >> 20), g_renderTid,
             g_p[P_FAST].v > 0.5f, g_p[P_BOUNCE].v, g_lampCount, g_lampUse);
         {   // 1.96: the CPU's frame in parts (hitch.inc); the GPU once
-            static char cl[640];
+            static char cl[1024];
+            HsText(cl, sizeof(cl));   // (1.98g: before HtAvgText: it uses the frame count)
+            if (cl[0]) Log("cpu, %s", cl);
+            FmText(cl, sizeof(cl));   // 1.98h
+            if (cl[0]) Log("%s", cl);
             HtAvgText(cl, sizeof(cl));
             if (cl[0]) Log("cpu: %s", cl);
             static bool gpuLogged;
@@ -4371,6 +4724,7 @@ static HRESULT STDMETHODCALLTYPE HkPresent(IDXGISwapChain* sc, UINT sync, UINT f
         WindFrame(ctx);     // 1.87: the wind in the leaves (wind.inc)
         WeatherTick();      // 1.82: the weather's state, the settings it drives (weather.inc)
         SecEnforce();       // 1.96: switched-off sections stay off (the weather drives some of their settings)
+        PpHold();           // 1.98b: the pass profile's setting held off (the weather drives some)
         CarRainTick(ctx);   // 1.74: the rain drops on the player's car (carrain.inc)
         ProfFrameEnd(ctx);
     }
@@ -4784,7 +5138,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID)
         ZoneLoad();
         WeLoad();
         BptLoad();
-        Log("NewLook 1.96h loaded");
+        Log("NewLook 1.98 loaded");
         AddVectoredExceptionHandler(0, CrashLogger);
         InstallHooks();
     }

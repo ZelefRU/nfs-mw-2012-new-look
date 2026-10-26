@@ -8,7 +8,7 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 
 [Русская версия](README.ru.md) · [Changelog](CHANGELOG.md) · [Known issues / TODO](TODO.md) · [Dev log](docs/DEVLOG.md)
 
-> Version **1.96h** (formerly **NFSLight**). Work in progress: it runs and looks good on the author's PC; expect rough edges (see
+> Version **1.98** (formerly **NFSLight**). Work in progress: it runs and looks good on the author's PC; expect rough edges (see
 > [Known issues](#known-issues)).
 
 ## Features
@@ -47,6 +47,8 @@ reflections, wet streets, volumetric clouds, street-lamp lights and haze, all tu
 **Rain, weather, wind** (experimental)
 - Rain drops on the player's car, simulated on its shape: they land, merge, run down and blow back with speed.
 - Wind in the trees' leaves.
+- Grass on the city's lawns (MATERIALS, off by default: it costs). The lawns never get puddles, with the grass off too.
+- Storms and overcast: under a thick cloud deck the light comes from the clouds (grey, even, from above), not the sun.
 - Weather (rain by hand or by itself, weather kinds, falling rain, splashes, ripples, rain on the lens): in the menu's
   WEATHER section, **off** in the release while it is being finished.
 

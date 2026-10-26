@@ -4,6 +4,18 @@ NewLook was called NFSLight up to 1.63.
 
 Newest first. Every entry is detailed in [docs/DEVLOG.md](docs/DEVLOG.md).
 
+- 1.98 (2026-10-26): release: grass off by default with the lawns always kept dry; experimental parts (grass, weather) marked with an orange dot; SkyTest out of the menu
+- 1.98z .. 1.98ab (2026-10-26): the game's sky light really replaced under a thick deck (the fast path); cars keep their own; the sun fades from cover 0.60 to 0.95; eye adaptation without feedback and without odd reads (no flicker)
+- 1.98v .. 1.98y (2026-10-26): overcast light: under a thick deck the game's clear-sky light swapped for an overcast sky's (Sky: light under a thick deck); no sun at full cover whatever the rain clouds
+- 1.98s .. 1.98u (2026-10-26): in a storm the deck reaches the horizon; the game's fog gradient, fill light and sky gradient grey under it
+- 1.98q / 1.98r (2026-10-26): Eye adaptation (1 = the game's): the game's auto exposure weakened; the haze under a deck
+- 1.98k .. 1.98p (2026-10-26): the game's reflections in a storm: its second-layer sky shader replaced, our clouds from the sky probe, the cars' cube map is our sky probe, no sun glint behind a deck; Shift+U saves the cars' cube map
+- 1.98h .. 1.98j (2026-10-26): the sky's views kept apart (no targets made anew); fewer traffic car copies; SkyViews
+- 1.98a .. 1.98g (2026-10-26): the pass profile (Ctrl+Shift+B, A / B blocks); sharp reflection detail at full size (ReflectionSharp); relief's sun march only where the sun is; lamps at half size with the strongest at full size; lamp tiles' depth in blocks; cheaper clouds at night
+- 1.97a .. 1.97p (2026-10-26): grass on the lawns (found from the game's terrain shaders, blades in rings with wind, pressed by the car); lawns soak the rain up (no puddles, the game's own off there)
+- 1.96n / 1.96o (2026-10-26): SkyTest; the sky cheaper with the same look (probe, cloud shadows, resolve)
+- 1.96j .. 1.96m (2026-10-26): street lamps cheaper at night (tiles cut by depth, weak lamps' shadow rays skipped, glow per tile, shadow rays batched); new settings marked in the menu
+- 1.96i (2026-10-26): no bright lines along contact lines in wet reflections; no grain in the clouds overhead
 - 1.96h (2026-10-25): no white 1-pixel rims at things' edges (the anti-shimmer no longer counts a silhouette as bumps)
 - 1.96g (2026-10-25): faster clouds with the same look (SkyFast 1; 2 = faster, changes the look); SsrEdges: an edge-on pixel reflects as face on
 - 1.96f (2026-10-25): a cheaper cloud march; the sky's GPU cost shown in parts (clouds, cloud shadows, sky)

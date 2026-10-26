@@ -319,9 +319,13 @@ static void BenchStop()
 static void QbSampleGpu(double frameMs, const double* pass);
 static void QbSampleCpu(double ms);
 static void QbTick();
+static void PpSampleGpu(double frameMs, const double* pass);   // 1.98b: the pass profile
+static void PpSampleCpu(double ms);
+static void PpTick();
 static void BenchSample(double frameMs, const double* pass)
 {
     QbSampleGpu(frameMs, pass);   // 1.96: the quick bench
+    PpSampleGpu(frameMs, pass);   // 1.98b: the pass profile
     if (g_padOn) g_padMs = pass[PR_PAD];
     if (g_benchPhase != 3 || frameMs <= 0 || g_sN >= 512) return;
     g_sGpu[g_sN++] = frameMs - (g_padOn ? pass[PR_PAD] : 0);   // the padding's own time out (it wobbles with the clocks)
@@ -331,6 +335,7 @@ static void BenchSample(double frameMs, const double* pass)
 static void BenchCpu(double ms, double modMs)
 {
     QbSampleCpu(ms);
+    PpSampleCpu(ms);
     LONG dc = g_drawCnt[0] + g_drawCnt[1] + g_drawCnt[2] + g_drawCnt[3];
     double draws = (double)(dc - g_drawsAtFrame);
     g_drawsAtFrame = dc;
@@ -479,6 +484,7 @@ static void BenchFinish()
 static void BenchTick()
 {
     QbTick();   // 1.96: the quick bench
+    PpTick();   // 1.98b: the pass profile
     if (g_benchPhase < 0) return;
     ++g_benchFrame;
     if (g_benchPhase == 0) {   // flying to a viewpoint: the world around it streams in
@@ -726,10 +732,7 @@ static void QbSampleCpu(double ms) { if (g_qbPhase == 2 && g_qbSN < 600) { g_qbS
 static void QbSampleGpu(double frameMs, const double* pass)
 {
     if (g_qbPhase != 2 || frameMs <= 0 || g_qbSGN >= 600) return;
-    double mod = 0;
-    static const int kMod[] = { PR_COPY, PR_HALF, PR_BLUR, PR_LAMPS, PR_SUN, PR_AIR, PR_LOOK, PR_EARLY, PR_PROBE, PR_SSMASK, PR_CLOUDS, PR_CSHADOW, PR_SKYDRAW };
-    for (int k = 0; k < (int)(sizeof(kMod) / sizeof(kMod[0])); ++k) mod += pass[kMod[k]];
-    g_qbSG[g_qbSGN] = frameMs; g_qbSM[g_qbSGN] = mod; ++g_qbSGN;
+    g_qbSG[g_qbSGN] = frameMs; g_qbSM[g_qbSGN] = ModPassMs(pass); ++g_qbSGN;   // (1.98b: the mask was counted twice)
 }
 
 // the costs, the report
@@ -800,7 +803,7 @@ static void QbReport()
     SYSTEMTIME st;
     GetLocalTime(&st);
     if (f) {
-        fprintf(f, "NewLook 1.96h benchmark, %04d-%02d-%02d %02d:%02d (it took %.1f min)\n", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, (QbNow() - g_qbStartT) / 60);
+        fprintf(f, "NewLook 1.98 benchmark, %04d-%02d-%02d %02d:%02d (it took %.1f min)\n", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, (QbNow() - g_qbStartT) / 60);
         fprintf(f, "GPU: %s\n", gpu);
         fprintf(f, "Screen %ux%u; the game draws %ux%u%s\n", g_bbW, g_bbH, g_rtW, g_rtH,
                 (double)g_rtW * g_rtH > 1.3 * g_bbW * g_bbH ? "  <- its ANTI-ALIASING IS ON: every effect costs that much more" : " (its anti-aliasing off)");
@@ -934,5 +937,417 @@ static void QbTick()
     g_qbPhase = -1;
     QbReport();
     sprintf(g_lampMsg, "benchmark done: the costs are next to the sections (scripts\\NewLook_bench_report.txt)");
+    g_textDirty = true;
+}
+
+// ---------------------------------------------------------------- 1.98b: the pass profile (Ctrl+Shift+B)
+// For the optimisation: where the GPU's time goes, pass by pass, and what each setting costs in those passes. By day and
+// at night (the game's clock set as the quick bench sets it; not hooked: as it is now), hands off: the mod, then each
+// setting that is on, switched off and on in turn.
+// 1.98c: A / B in alternating blocks of 8 frames (as set, off, as set, off ...), the first 3 of each block left out (the
+// histories, the caches), until each side has 60 frames (or 6 s). 1.98b's windows of a second, one after the other, were
+// swamped: the same "everything as set" moved by 1-2 ms from one window to the next (the view, the clocks) where a
+// setting changed it by tenths. Each frame the profiler reads (5 late) carries its state (ProfFrame::tag): its passes'
+// times, the GPU's frame span go to that side. A setting's cost: as set minus off, in our passes (where: the parts that
+// change most) and in the whole frame (it also holds what a setting costs inside the game's own draws: materials,
+// parallax), each with its uncertainty (the standard error from the frames' spread). As set: all the "as set" frames of
+// the scene (each part's mean, its spread from frame to frame, its most). The report: scripts\NewLook_profile.txt.
+// 1.98d: useAlt: against alt, not the setting's off value (SkyTest's parts of the sky; alt < 0: the other of 0 / 1)
+// slow: in blocks of 90 frames (30 left out), 2 each: its switch remakes targets (not every 8 frames)
+struct PpFx { const char* name; short p; bool night; float alt; bool useAlt; bool slow; };   // night: at night only (the lamps; the dearest last)
+static const PpFx kPpFx[] = {
+    { "sun shadows: our maps", P_SS, false },
+    { "soft sun shadows", P_SOFT_SUN, false },
+    { "contact shadows", 0, false },
+    { "ambient occlusion", 6, false },
+    { "sky occlusion", P_SKY_OCC, false },
+    { "bounce light", P_BOUNCE, false },
+    { "haze", 16, false },
+    { "light shafts", 19, false },
+    { "sun glow", 18, false },
+    { "reflections", P_SSR, false },
+    { "reflections: wet ground", P_SSR + 1, false },
+    { "car paint reflections", 109, false },
+    { "puddles", 112, false },
+    { "sky: ours", P_SKY, false },
+    { "sky: no cloud march", 260, false, 1.0f, true },          // (SkyTest 1 .. 5, sky.inc / skyrefl.inc)
+    { "sky: no cloud shadow map", 260, false, 2.0f, true },
+    { "sky: no sky probe", 260, false, 3.0f, true },
+    { "sky: game's reflections untinted", 260, false, 4.0f, true },
+    { "sky: the game's sky shader", 260, false, 5.0f, true },
+    { "sky in the game's reflections: its own", P_SKY_VIEWS, false, 0.0f, true },        // (1.98h)
+    { "sky in the game's reflections: with our clouds", P_SKY_VIEWS, false, 2.0f, true },   // (1.98j: 1 the default)
+    { "sky: our night off", P_SKY_NIGHT, false },
+    { "sky: no stars", P_SKY + 7, false },
+    { "sky: no cloud shadows on the ground", P_SKY + 8, false },
+    { "colour grading", P_LOOK, false },
+    { "relief", P_REL, false },
+    { "test: relief without its sky part", 266, false, 1.0f, true },   // (1.98f: PerfTest, NewLook.hlsl PerfT)
+    { "test: relief without its sun part", 266, false, 2.0f, true },
+    { "test: no bounce fetch in the sun pass", 266, false, 6.0f, true },
+    { "parallax: roads", P_POM, false },
+    { "parallax: buildings", P_POM + 3, false },
+    { "lighting model (modern)", P_PBR, false },
+    { "grass", P_GRASS, false },
+    { "headlight beams", P_HL_BEAM, true },
+    { "traffic car lights", P_TRAFFIC, true },
+    { "lamps: glow in the air", P_GLOW, true },
+    { "lamps: on every post", P_AUTO_LAMPS, true },
+    { "lamps: screen-space shadows", P_LAMP_SHADOW, true },
+    { "lamps: shadow maps", P_LAMP_SHADOW_MAPS, true },
+    { "test: lamps split, no full-size fallback", 266, true, 3.0f, true },
+    { "test: lamps split, by distance alone", 266, true, 4.0f, true },
+    { "test: lamps split, no strongest lamp at full size", 266, true, 5.0f, true },
+    { "lamps: the other resolution", P_LAMP_RES, true, -1.0f, true, true },
+    { "lamps (all)", P_LAMP, true },
+};
+static const int kPpFxN = sizeof(kPpFx) / sizeof(kPpFx[0]);
+static const int kPpWinMax = 48, kPpBlock = 8, kPpSkip = 3, kPpNeed = 60, kPpSmp = 400, kPpLeafMax = 32;
+static int g_ppPhase = -1;                       // -1 idle; 0 a scene settling; 1 a setting's A / B; 2 its last frames coming in
+static int g_ppScn[2], g_ppScnN, g_ppSc;         // the scenes (QB_DAY, QB_NIGHT or QB_NOW), the one now
+static int g_ppPlan[2][kPpWinMax], g_ppPlanN[2], g_ppWin;   // the items: -2 the mod, 0.. kPpFx's setting
+// per item, per side (0 as set, 1 off): each pass's mean, the frame span's median, the uncertainties, the frames
+static double g_ppPass[2][kPpWinMax][2][PR_COUNT], g_ppSpan[2][kPpWinMax][2], g_ppErrF[2][kPpWinMax], g_ppErrM[2][kPpWinMax], g_ppWait[2][kPpWinMax];
+static int g_ppNs[2][kPpWinMax][2];
+// this item's samples, per side
+static double g_ppAS[2][PR_COUNT], g_ppAG[2][kPpSmp], g_ppAM[2], g_ppAM2[2], g_ppAWs;
+static int g_ppAN[2], g_ppAWn;
+// the scene's "as set" frames, per part (PpLeaves): sum, sum of squares, the most; and the frame span's
+static double g_ppLS[2][kPpLeafMax], g_ppLS2[2][kPpLeafMax], g_ppLMax[2][kPpLeafMax], g_ppLF[2];
+static int g_ppLN[2];
+// 1.98d: the "as set" frames by their states (ProfFrame::flags): count, the sun pass, our passes, the frame
+static double g_ppStSun[2][8], g_ppStM[2][8], g_ppStF[2][8];
+static int g_ppStN[2][8];
+static float g_ppOrig[kPpFxN];
+static int g_ppHeld = -1;                        // the setting off now (held after the weather and the sections)
+static double g_ppPhaseT, g_ppStartT;
+static int g_ppFrames;
+static float g_ppTod0;
+static bool g_ppTodSet, g_ppTodUsed, g_ppWasEnabled;
+static SunPathState g_ppSp;
+
+// the passes without overlaps: the umbrellas (half-res, air, snap) as their parts and what is left of them; ours first,
+// then the game's two timed ones
+static const char* kPpLeafN[] = {
+    "sun (our full-size light)", "half-res: camera record, lamp tiles", "half-res: sun shadow mask", "half-res: its pass (AO, sky occl., bounce)",
+    "half-res: the rest", "bounce blur", "lamps (their light)", "air: reflections' rays + blur", "air: snapshot (half size, mips)",
+    "air: reflections onto the frame", "air: the air itself (haze, shafts, glow)", "air: the rest (rain, lens)", "copy of the frame",
+    "look (grading)", "reflections' early copy", "sky probe", "clouds", "cloud shadows", "sky draw", "wet gloss", "grass",
+    "the game's sun light", "shadow maps (the game's + ours)" };
+static const int kPpLeafMod = 21, kPpLeafN_ = 23;   // the first of the game's; all
+static int PpLeaves(const double* g, double* v)
+{
+    int n = 0;
+    v[n++] = g[PR_SUN];
+    v[n++] = g[PR_TILES]; v[n++] = g[PR_SSMASK]; v[n++] = g[PR_AO]; v[n++] = g[PR_HALF] - g[PR_TILES] - g[PR_SSMASK] - g[PR_AO];
+    v[n++] = g[PR_BLUR]; v[n++] = g[PR_LAMPS];
+    v[n++] = g[PR_SSR]; v[n++] = g[PR_SNAP] - g[PR_SSR]; v[n++] = g[PR_APPLY]; v[n++] = g[PR_AIRPS];
+    v[n++] = g[PR_AIR] - g[PR_SNAP] - g[PR_APPLY] - g[PR_AIRPS];
+    v[n++] = g[PR_COPY]; v[n++] = g[PR_LOOK]; v[n++] = g[PR_EARLY]; v[n++] = g[PR_PROBE]; v[n++] = g[PR_CLOUDS]; v[n++] = g[PR_CSHADOW];
+    v[n++] = g[PR_SKYDRAW]; v[n++] = g[PR_WETGLOSS]; v[n++] = g[PR_GRASS];
+    v[n++] = g[PR_GAMESUN]; v[n++] = g[PR_SHPASS];
+    return n;
+}
+
+static const char* PpItemName(int w)
+{
+    if (w == -2) return "the mod";
+    if (kPpFx[w].p == P_LAMP_RES) return g_ppOrig[w] < 0.5f ? "lamps: at half res (now full)" : "lamps: at full res (now half)";
+    return kPpFx[w].name;
+}
+// its "off" (or other) value
+static float PpOffV(int i)
+{
+    const PpFx& F = kPpFx[i];
+    if (!F.useAlt) return BenchOff(F.p);
+    return F.alt >= 0 ? F.alt : (g_ppOrig[i] < 0.5f ? 1.0f : 0.0f);
+}
+// on as set (not at its off value, its section on)
+static bool PpOn(int i)
+{
+    int p = kPpFx[i].p, s = SecKilling(p);
+    if (s >= 0 && g_secOff[s]) return false;
+    return fabsf(g_p[p].v - PpOffV(i)) > 1e-4f;
+}
+static void PpSet(int w, bool on)
+{
+    if (w == -2) { g_enabled = on; return; }
+    if (w < 0) return;
+    g_p[kPpFx[w].p].v = on ? g_ppOrig[w] : PpOffV(w);
+    g_ppHeld = on ? -1 : w;
+}
+// at Present after the weather and the sections: the setting off stays off (the weather drives the haze, the puddles)
+static void PpHold() { if (g_ppPhase >= 0 && g_ppHeld >= 0) g_p[kPpFx[g_ppHeld].p].v = PpOffV(g_ppHeld); }
+static void PpScene(int sc) { if (g_ppTodSet) TodSet(sc == QB_NIGHT ? 7200.0f : 50000.0f); }
+static void PpPlanScene(int k)
+{
+    int sc = g_ppScn[k];
+    bool night = sc == QB_NIGHT || (sc == QB_NOW && g_nightF > 0.5f);
+    int n = 0;
+    g_ppPlan[k][n++] = -2;
+    for (int i = 0; i < kPpFxN && n < kPpWinMax; ++i)
+        if (!((kPpFx[i].night && !night) || !PpOn(i))) g_ppPlan[k][n++] = i;
+    g_ppPlanN[k] = n;
+    for (int i = 0; i < n; ++i)
+        for (int s = 0; s < 2; ++s) {
+            g_ppSpan[k][i][s] = 0; g_ppNs[k][i][s] = 0;
+            for (int j = 0; j < PR_COUNT; ++j) g_ppPass[k][i][s][j] = 0;
+        }
+    for (int j = 0; j < kPpLeafMax; ++j) g_ppLS[k][j] = g_ppLS2[k][j] = g_ppLMax[k][j] = 0;
+    g_ppLF[k] = 0; g_ppLN[k] = 0;
+    for (int j = 0; j < 8; ++j) { g_ppStSun[k][j] = g_ppStM[k][j] = g_ppStF[k][j] = 0; g_ppStN[k][j] = 0; }
+}
+static void PpItemStart()
+{
+    for (int s = 0; s < 2; ++s) {
+        g_ppAN[s] = 0; g_ppAM[s] = g_ppAM2[s] = 0;
+        for (int j = 0; j < PR_COUNT; ++j) g_ppAS[s][j] = 0;
+    }
+    g_ppAWs = 0; g_ppAWn = 0;
+    g_ppPhase = 1; g_ppPhaseT = QbNow(); g_ppFrames = 0;
+}
+static void PpRestore()
+{
+    g_enabled = g_ppWasEnabled;
+    if (g_ppTodSet) {   // (the game's clock and our path as they were: its light, read back late, held 1.5 s)
+        TodSet(g_ppTod0);
+        g_sp = g_ppSp;
+        g_spHoldUntil = QbNow() + 1.5;
+    }
+    g_ppTodSet = false;
+    g_ppHeld = -1;
+    g_pfTag = 0;
+    g_qbHold = false;
+    g_benchUncap = false;
+    SecEnforce();
+}
+static void PpStop(const char* why)
+{
+    if (g_ppPhase < 0) return;
+    int k = g_ppSc;
+    if (g_ppPhase >= 1 && g_ppWin < g_ppPlanN[k]) PpSet(g_ppPlan[k][g_ppWin], true);
+    PpRestore();
+    g_ppPhase = -1;
+    sprintf(g_lampMsg, "pass profile %s", why);
+    Log("pass profile: %s", why);
+}
+static void PpStart()
+{
+    if (!g_profOk) { strcpy(g_lampMsg, "pass profile: the GPU timing is not ready yet"); return; }
+    if (g_weOn) WeToggle();
+    g_ppWasEnabled = g_enabled;
+    g_enabled = true;
+    for (int i = 0; i < kPpFxN; ++i) g_ppOrig[i] = g_p[kPpFx[i].p].v;
+    g_ppTodSet = g_ppTodUsed = TodKnown();
+    g_ppTod0 = TodGet();
+    g_ppSp = g_sp;
+    g_ppScnN = 0;
+    if (g_ppTodSet) { g_ppScn[g_ppScnN++] = QB_DAY; g_ppScn[g_ppScnN++] = QB_NIGHT; }
+    else g_ppScn[g_ppScnN++] = QB_NOW;   // (the game's clock not found: as it is now)
+    for (int k = 0; k < g_ppScnN; ++k) PpPlanScene(k);
+    g_ppSc = 0;
+    g_ppHeld = -1;
+    g_pfTag = 0;
+    g_qbHold = true;
+    g_benchUncap = true;
+    PpScene(g_ppScn[0]);
+    g_ppPhase = 0;
+    g_ppStartT = g_ppPhaseT = QbNow();
+    g_ppFrames = 0;
+    char gpu[256];
+    GpuDesc(gpu, sizeof(gpu));
+    int n = 0;
+    for (int k = 0; k < g_ppScnN; ++k) n += g_ppPlanN[k];
+    Log("pass profile: start: %d scene(s), %d items (A / B, blocks of %d frames); the game's clock %s (%.0f s); %s; screen %ux%u, the game draws %ux%u",
+        g_ppScnN, n, kPpBlock, g_ppTodSet ? "set" : "not found: as it is", g_ppTod0, gpu, g_bbW, g_bbH, g_rtW, g_rtH);
+}
+
+// the samples (BenchCpu, BenchSample: the GPU's 5 frames late, with the state the frame was drawn in)
+static void PpSampleCpu(double ms) { if (g_ppPhase == 1) { g_ppAWs += g_benchWaitMs; ++g_ppAWn; } }
+static void PpSampleGpu(double frameMs, const double* pass)
+{
+    if (g_ppPhase < 1 || frameMs <= 0 || g_pfTagRead <= 0) return;
+    int t = g_pfTagRead - 1, side = t & 1, j = (t >> 1) % kPpWinMax, k = (t >> 1) / kPpWinMax;
+    if (k != g_ppSc || j != g_ppWin || g_ppAN[side] >= kPpSmp) return;
+    double span = frameMs - pass[PR_OVERLAY], m = ModPassMs(pass);   // (the menu's own, if it is open, out)
+    g_ppAG[side][g_ppAN[side]++] = span;
+    g_ppAM[side] += m; g_ppAM2[side] += m * m;
+    for (int i = 0; i < PR_COUNT; ++i) g_ppAS[side][i] += pass[i];
+    if (side == 0) {   // the scene's "as set"
+        double v[kPpLeafMax];
+        int n = PpLeaves(pass, v);
+        for (int i = 0; i < n; ++i) { g_ppLS[k][i] += v[i]; g_ppLS2[k][i] += v[i] * v[i]; if (v[i] > g_ppLMax[k][i]) g_ppLMax[k][i] = v[i]; }
+        g_ppLF[k] += span; ++g_ppLN[k];
+        int st = (int)(g_pfFlagsRead & 7);
+        g_ppStSun[k][st] += pass[PR_SUN]; g_ppStM[k][st] += m; g_ppStF[k][st] += span; ++g_ppStN[k][st];
+    }
+}
+// a setting done: its sides' figures
+static void PpItemDone()
+{
+    int k = g_ppSc, j = g_ppWin;
+    double var[2] = {}, varM[2] = {};
+    for (int s = 0; s < 2; ++s) {
+        int n = g_ppAN[s];
+        g_ppNs[k][j][s] = n;
+        for (int i = 0; i < PR_COUNT; ++i) g_ppPass[k][j][s][i] = n ? g_ppAS[s][i] / n : 0;
+        double mean = 0;
+        for (int i = 0; i < n; ++i) mean += g_ppAG[s][i];
+        mean = n ? mean / n : 0;
+        for (int i = 0; i < n; ++i) var[s] += (g_ppAG[s][i] - mean) * (g_ppAG[s][i] - mean);
+        var[s] = n > 1 ? var[s] / (n - 1) : 0;
+        double mm = n ? g_ppAM[s] / n : 0;
+        varM[s] = n > 1 ? (g_ppAM2[s] - n * mm * mm) / (n - 1) : 0;
+        if (varM[s] < 0) varM[s] = 0;
+        g_ppSpan[k][j][s] = Median(g_ppAG[s], n);
+    }
+    int n0 = g_ppNs[k][j][0] > 0 ? g_ppNs[k][j][0] : 1, n1 = g_ppNs[k][j][1] > 0 ? g_ppNs[k][j][1] : 1;
+    g_ppErrF[k][j] = sqrt(var[0] / n0 + var[1] / n1);
+    g_ppErrM[k][j] = sqrt(varM[0] / n0 + varM[1] / n1);
+    g_ppWait[k][j] = g_ppAWn ? g_ppAWs / g_ppAWn : 0;
+    int w = g_ppPlan[k][j];
+    Log("pass profile: %-5s %-30s as set %6.2f / off %6.2f ms (+-%.2f), our passes %6.2f / %6.2f (+-%.2f); %d / %d frames", kQbScn[g_ppScn[k]], PpItemName(w),
+        g_ppSpan[k][j][0], g_ppSpan[k][j][1], g_ppErrF[k][j], ModPassMs(g_ppPass[k][j][0]), ModPassMs(g_ppPass[k][j][1]), g_ppErrM[k][j],
+        g_ppNs[k][j][0], g_ppNs[k][j][1]);
+}
+
+static void PpReport()
+{
+    char path[MAX_PATH];
+    sprintf(path, "%sNewLook_profile.txt", g_dir);
+    FILE* f = fopen(path, "w");
+    if (!f) { Log("pass profile: %s not written", path); return; }
+    char gpu[256];
+    GpuDesc(gpu, sizeof(gpu));
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    fprintf(f, "NewLook 1.98 pass profile, %04d-%02d-%02d %02d:%02d (it took %.1f min)\n", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, (QbNow() - g_ppStartT) / 60);
+    fprintf(f, "GPU: %s\n", gpu);
+    fprintf(f, "Screen %ux%u; the game draws %ux%u; quality %s; sections off:", g_bbW, g_bbH, g_rtW, g_rtH, kQualNames[QualMatch()]);
+    int offN = 0;
+    for (int s = 0; s < kSecN; ++s) if (g_p[P_SEC0 + s].v < 0.5f) fprintf(f, "%s %s", offN++ ? "," : "", kSec[s].name);
+    fprintf(f, "%s\n", offN ? "" : " none");
+    fprintf(f, "The game's clock: %s\n", g_ppTodUsed ? "set (day: its midday, night: 02:00), then put back" : "not found: measured as it was");
+    fprintf(f, "GPU ms a frame. Each setting off and on in turn every %d frames (the first %d of each left out): the view and the\n"
+               "clocks drifting do not get in. Our passes: their timestamps' mean. The whole frame: the GPU's frame span, the median.\n"
+               "+- : the uncertainty (the standard error from the frames' spread). * : not GPU-bound (the CPU's wait in Present\n"
+               "under 1 ms: the frame span is then about the CPU's frame).\n", kPpBlock, kPpSkip);
+    static double lv[kPpWinMax][kPpLeafMax];
+    for (int k = 0; k < g_ppScnN; ++k) {
+        int sc = g_ppScn[k], n = g_ppPlanN[k], ln = kPpLeafN_;
+        if (!g_ppLN[k]) continue;
+        int N = g_ppLN[k];
+        double v[kPpLeafMax], sd[kPpLeafMax], mod = 0;
+        for (int i = 0; i < ln; ++i) {
+            v[i] = g_ppLS[k][i] / N;
+            double var = g_ppLS2[k][i] / N - v[i] * v[i];
+            sd[i] = var > 0 ? sqrt(var) : 0;
+            if (i < kPpLeafMod) mod += v[i];
+        }
+        double span = g_ppLF[k] / N;
+        fprintf(f, "\n==================== %s ====================\n", kQbScn[sc]);
+        if (g_ppPlan[k][0] == -2 && g_ppNs[k][0][1] > 0) {
+            const double* on = g_ppPass[k][0][0];
+            double fOn = g_ppSpan[k][0][0], fOff = g_ppSpan[k][0][1];
+            fprintf(f, "With NewLook %.2f ms (%.0f FPS by the GPU); the game alone %.2f%s; NewLook %.2f +-%.2f: %.2f in its own passes, %.2f in the game's draws and untimed\n",
+                    fOn, fOn > 0 ? 1000 / fOn : 0, fOff, g_ppWait[k][0] >= 1.0 ? "" : "*", fOn - fOff, g_ppErrF[k][0], ModPassMs(on), fOn - fOff - ModPassMs(on));
+        }
+        fprintf(f, "\nOur passes, everything as set (%d frames; ms: the mean, its spread from frame to frame, the most in a frame; %% of the frame):\n", N);
+        int ord[kPpLeafMax];
+        for (int j = 0; j < kPpLeafMod; ++j) ord[j] = j;
+        std::sort(ord, ord + kPpLeafMod, [&](int a, int b) { return v[a] > v[b]; });
+        for (int j = 0; j < kPpLeafMod; ++j)
+            if (fabs(v[ord[j]]) >= 0.005)
+                fprintf(f, "  %-46s %6.2f  sd %5.2f  most %5.2f  %4.1f%%\n", kPpLeafN[ord[j]], v[ord[j]], sd[ord[j]], g_ppLMax[k][ord[j]], span > 0 ? 100 * v[ord[j]] / span : 0);
+        fprintf(f, "  %-46s %6.2f                      %4.1f%%   (the frame %.2f)\n", "all of them", mod, span > 0 ? 100 * mod / span : 0, span);
+        fprintf(f, "The game's, timed: %s %.2f (sd %.2f), %s %.2f (sd %.2f)\n", kPpLeafN[kPpLeafMod], v[kPpLeafMod], sd[kPpLeafMod],
+                kPpLeafN[kPpLeafMod + 1], v[kPpLeafMod + 1], sd[kPpLeafMod + 1]);
+        fprintf(f, "The as-set frames by state (the sun pass, our passes, the frame):\n");
+        for (int st = 0; st < 8; ++st) {
+            int c = g_ppStN[k][st];
+            if (!c) continue;
+            fprintf(f, "  %-52s %5d frames (%4.1f%%)  sun %5.2f  ours %5.2f  frame %5.2f\n",
+                    st == 0 ? "normal (the mask, the half-res pass, the tiles there)" : st == 1 ? "the sun shadow mask missing" : st == 2 ? "no half-res pass" :
+                    st == 4 ? "lamp tiles not ready" : "several missing", c, 100.0 * c / N, g_ppStSun[k][st] / c, g_ppStM[k][st] / c, g_ppStF[k][st] / c);
+        }
+        // each setting
+        double ours[kPpWinMax], frame[kPpWinMax];
+        int ro[kPpWinMax], rN = 0;
+        for (int j = 0; j < n; ++j) {
+            if (g_ppNs[k][j][0] <= 0 || g_ppNs[k][j][1] <= 0) continue;
+            double a[kPpLeafMax], b[kPpLeafMax];
+            PpLeaves(g_ppPass[k][j][0], a);
+            PpLeaves(g_ppPass[k][j][1], b);
+            for (int i = 0; i < ln; ++i) lv[j][i] = a[i] - b[i];
+            ours[j] = ModPassMs(g_ppPass[k][j][0]) - ModPassMs(g_ppPass[k][j][1]);
+            frame[j] = g_ppSpan[k][j][0] - g_ppSpan[k][j][1];
+            ro[rN++] = j;
+        }
+        std::sort(ro, ro + rN, [&](int x, int y) { return ours[x] > ours[y]; });
+        fprintf(f, "\nEach off: what it saves (ms; + = cheaper without it; +- its uncertainty) in our passes and in the whole frame; where:\n");
+        for (int jj = 0; jj < rN; ++jj) {
+            int j = ro[jj];
+            char where[480], *q = where;
+            int lo[kPpLeafMax];
+            for (int t = 0; t < ln; ++t) lo[t] = t;
+            std::sort(lo, lo + ln, [&](int x, int y) { return fabs(lv[j][x]) > fabs(lv[j][y]); });
+            *q = 0;
+            for (int t = 0; t < 5 && fabs(lv[j][lo[t]]) >= 0.03; ++t) q += sprintf(q, "%s%s %+.2f", t ? ", " : "", kPpLeafN[lo[t]], lv[j][lo[t]]);
+            fprintf(f, "  %-30s ours %+6.2f +-%4.2f  frame %+6.2f +-%4.2f%s  %s\n", PpItemName(g_ppPlan[k][j]), ours[j], g_ppErrM[k][j], frame[j], g_ppErrF[k][j],
+                    g_ppWait[k][j] >= 1.0 ? " " : "*", where);
+        }
+        Log("pass profile: %s: the frame %.2f ms as set, our passes %.2f", kQbScn[sc], span, mod);
+    }
+    fclose(f);
+    Log("pass profile: done in %.1f min -> %s", (QbNow() - g_ppStartT) / 60, path);
+}
+
+// every frame (BenchTick, before Present): the state of the frame drawn next
+static void PpTick()
+{
+    if (g_ppPhase < 0) return;
+    double t = QbNow() - g_ppPhaseT;
+    int k = g_ppSc, sc = g_ppScn[k];
+    PpScene(sc);   // (kept: the game's clock at the scene's hour)
+    if (g_ppPhase == 0) {   // a scene: its light, exposure, shadows, clouds and lamps settle
+        ++g_ppFrames;
+        g_pfTag = 0;
+        sprintf(g_lampMsg, "pass profile: %s, settling ... hands off (B stops)", kQbScn[sc]);
+        if (t >= (sc == QB_NIGHT ? 6.0 : 4.0) && g_ppFrames >= 20) { g_ppWin = 0; PpItemStart(); }
+        return;
+    }
+    int w = g_ppPlan[k][g_ppWin];
+    if (g_ppPhase == 1) {   // A / B
+        bool slow = w >= 0 && kPpFx[w].slow;
+        int bl = slow ? 90 : kPpBlock, sk = slow ? 30 : kPpSkip;
+        int fi = g_ppFrames++, blk = fi / bl, pos = fi % bl, off = blk & 1;
+        if (pos == 0 && !off && blk >= 4 && ((g_ppAN[0] >= kPpNeed && g_ppAN[1] >= kPpNeed) || t > (slow ? 12.0 : 6.0))) {
+            PpSet(w, true);   // (as set while the last frames' figures come in)
+            g_pfTag = 0;
+            g_ppPhase = 2; g_ppFrames = 0;
+            return;
+        }
+        if (pos == 0) PpSet(w, !off);
+        g_pfTag = pos >= sk ? 1 + ((k * kPpWinMax + g_ppWin) * 2 + off) : 0;
+        int done = 0, all = 0;
+        for (int j = 0; j < g_ppScnN; ++j) all += g_ppPlanN[j];
+        for (int j = 0; j < k; ++j) done += g_ppPlanN[j];
+        done += g_ppWin;
+        sprintf(g_lampMsg, "pass profile: %s, %s on / off (%d of %d) ... hands off (B stops)", kQbScn[sc], PpItemName(w), done + 1, all);
+        return;
+    }
+    // the last frames' figures (5 late)
+    if (++g_ppFrames < kProfLag + 2) return;
+    PpItemDone();
+    if (++g_ppWin < g_ppPlanN[k]) { PpItemStart(); return; }
+    if (++g_ppSc < g_ppScnN) {   // the next scene
+        PpScene(g_ppScn[g_ppSc]);
+        g_ppPhase = 0; g_ppPhaseT = QbNow(); g_ppFrames = 0;
+        return;
+    }
+    PpRestore();
+    g_ppPhase = -1;
+    PpReport();
+    sprintf(g_lampMsg, "pass profile done: scripts\\NewLook_profile.txt");
     g_textDirty = true;
 }

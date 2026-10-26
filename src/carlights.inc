@@ -241,6 +241,9 @@ static Car g_car[kCars];
 static void CarAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& dc)
 {
     if (g_p[P_TRAFFIC].v <= 0) return;
+    // 1.98j: the two copies a car draw (~580 draws a frame with traffic) cost ~1 ms of GPU (the frame map: the main
+    // G-buffer +1.0 ms with traffic, +0.13 with the mod off): none in full day (the lamps are off then, the cars' too)
+    if (g_ssFullDay && g_p[P_LAMP_DAY].v <= 0 && g_view != 24 && !g_weOn) return;
     VsInfo* e = DrawVs(ctx);   // (1.65: asked once a draw)
     if (!e || !(e->carBits & 2) || (e->carBits & 5) || e->wSlot < 0 || !MainTarget(ctx)) return;
     if (!g_carMatBuf) {
@@ -262,9 +265,18 @@ static void CarAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& dc)
     cb->GetDesc(&bd);
     if ((UINT)e->wOff + 64 > bd.ByteWidth) { cb->Release(); return; }
     D3D11_BOX box = { (UINT)e->wOff, 0, 0, (UINT)e->wOff + 64, 1, 1 };
-    // to the GPU list of this frame
-    if (g_carMatN < kCarDraws) { ctx->CopySubresourceRegion(g_carMatBuf, 0, g_carMatN * 64, 0, 0, cb, 0, &box); ++g_carMatN; }
+    // to the GPU list of this frame. 1.98k: a car's big parts only (its lamps snap to the nearest: one matrix a car
+    // does; ~40 parts a car, a copy each cost ~1 ms at night with traffic); a part not read back yet: copied
+    int mi = MeshOf(ctx, dc);
+    bool big = true;
+    if (mi >= 0 && g_mesh[mi].state == 3) {
+        float ext = 0;
+        for (int j = 0; j < 3; ++j) ext = fmaxf(ext, g_mesh[mi].bmax[j] - g_mesh[mi].bmin[j]);
+        big = ext > 2.5f;
+    }
+    if (big && g_carMatN < kCarDraws) { ctx->CopySubresourceRegion(g_carMatBuf, 0, g_carMatN * 64, 0, 0, cb, 0, &box); ++g_carMatN; }
     // and to this frame's staging buffer (the CPU follows the cars with it)
+    if (g_frame & 1) { cb->Release(); return; }   // 1.98j: the CPU's capture every other frame (its tracking goes by time)
     if (g_carStageCur < 0 || g_carStageFrame[g_carStageCur] != g_frame + 1) {
         g_carStageCur = -1;
         for (int k = 0; k < kCarStages; ++k) if (!g_carStageFrame[k]) { g_carStageCur = k; break; }
@@ -277,7 +289,7 @@ static void CarAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& dc)
     }
     if (g_carStageCur >= 0) {
         int& n = g_carStageN[g_carStageCur];
-        if (n < kCarDraws) { ctx->CopySubresourceRegion(g_carStage[g_carStageCur], 0, n * 64, 0, 0, cb, 0, &box); g_carStageMesh[g_carStageCur][n] = (short)MeshOf(ctx, dc); ++n; }
+        if (n < kCarDraws) { ctx->CopySubresourceRegion(g_carStage[g_carStageCur], 0, n * 64, 0, 0, cb, 0, &box); g_carStageMesh[g_carStageCur][n] = (short)mi; ++n; }
     }
     cb->Release();
 }

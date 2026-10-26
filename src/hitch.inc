@@ -9,6 +9,20 @@
 // measured against the performance counter.
 enum { HT_DRAW, HT_DRAWOURS, HT_PSSET, HT_TEXDRV, HT_TEX, HT_SRV, HT_SHDRV, HT_SH, HT_MAPDRV, HT_MAP, HT_PRESDRV, HT_PRES, HT_QUERY, HT_FLUSH, HT_COPY, HT_N };
 // (1.82b: + GetData (the game waiting on its queries: the GPU behind), Flush, CopyResource / CopySubresourceRegion)
+// 1.98g: the biggest of "ours round them" apart (nested in it; the render thread): our passes at the game's sun draw, the
+// sky (clouds, probe), our sun shadows' casters, the lamps' shadow maps, the car lights, the rain, the grade; and how many
+// draws the game makes a frame (traffic: more draws, each one through all of this); our sky shader's binds and draws
+enum { HS_SUN, HS_SKY, HS_SS, HS_LS, HS_CAR, HS_RAIN, HS_GRADE, HS_N };
+static unsigned long long g_hsT[HS_N];
+static double g_hsSum[HS_N];
+static volatile LONG g_hsDraws;
+static double g_hsDrawsSum;
+static LONG g_skySubN, g_skyBeforeN, g_skyDrawN, g_skyRemakeN;   // (sky.inc; summed, read by HsText)
+struct HsScope {
+    int c; unsigned long long t0;
+    HsScope(int k) : c(k), t0(__rdtsc()) {}
+    ~HsScope() { g_hsT[c] += __rdtsc() - t0; }
+};
 struct HtCat { volatile LONGLONG t, mx; volatile LONG n; };
 static HtCat g_ht[HT_N];
 static double g_htPerMs;                     // TSC ticks a ms (0: not measured yet)
@@ -83,7 +97,12 @@ static void HtFrameEnd(bool effectsOn)
             }
         }
         if (ms < 1000) g_htAvg = g_htAvg > 0 ? g_htAvg + ((ms < 100 ? ms : 100) - g_htAvg) * 0.02 : ms;
-        if (ms < 1000) { for (int c = 0; c < HT_N; ++c) g_htSum[c] += T(c); g_htSumMs += ms; ++g_htSumN; }
+        if (ms < 1000) {
+            for (int c = 0; c < HT_N; ++c) g_htSum[c] += T(c);
+            for (int c = 0; c < HS_N; ++c) g_hsSum[c] += g_hsT[c] / g_htPerMs;
+            g_hsDrawsSum += g_hsDraws;
+            g_htSumMs += ms; ++g_htSumN;
+        }
         if (g_htFrames >= 1800) {
             if (g_htHitches) Log("hitches (the last %u frames): %u frames over 50 ms (%u with our effects off), the worst %.0f ms (%.0f of it the game's own / not hooked)",
                                  g_htFrames, g_htHitches, g_htHitchesOff, g_htWorst, g_htWorstRest);
@@ -93,6 +112,26 @@ static void HtFrameEnd(bool effectsOn)
     }
     g_htFrameT = now;
     for (int c = 0; c < HT_N; ++c) { g_ht[c].t = 0; g_ht[c].mx = 0; g_ht[c].n = 0; }
+    for (int c = 0; c < HS_N; ++c) g_hsT[c] = 0;
+    g_hsDraws = 0;
+}
+
+// 1.98g: the parts of ours (HsScope) and the counts, a frame on average since the last stats line (before HtAvgText)
+static void HsText(char* out, int n)
+{
+    *out = 0;
+    if (g_htSumN) {
+        double k = 1.0 / g_htSumN;
+        _snprintf(out, n - 1, "ours: at the game's sun draw (our passes) %.2f, sky %.2f, sun-shadow casters %.2f, lamp shadow maps %.2f, "
+                  "car lights %.2f, rain %.2f, grade %.2f | the game's draws a frame %.0f | our sky shader a frame: binds %.2f, draws %.2f, "
+                  "cloud passes %.2f, cloud targets made %ld",
+                  g_hsSum[HS_SUN] * k, g_hsSum[HS_SKY] * k, g_hsSum[HS_SS] * k, g_hsSum[HS_LS] * k, g_hsSum[HS_CAR] * k, g_hsSum[HS_RAIN] * k,
+                  g_hsSum[HS_GRADE] * k, g_hsDrawsSum * k, g_skySubN * k, g_skyDrawN * k, g_skyBeforeN * k, g_skyRemakeN);
+        out[n - 1] = 0;
+    }
+    for (int c = 0; c < HS_N; ++c) g_hsSum[c] = 0;
+    g_hsDrawsSum = 0;
+    g_skySubN = g_skyBeforeN = g_skyDrawN = g_skyRemakeN = 0;
 }
 
 // 1.96: an average frame's parts since the last call (the stats line every 10 s), then from 0 again

@@ -1583,7 +1583,7 @@ static void WeFrame()
     bool live = g_weOn || (g_weN && g_weApply);
     // (our sun shadows know their objects by the copies too; 1.65: the rain map's and the lamp faces' replays are recorded
     // with the copies, at night too)
-    bool copy = live || (g_enabled && ((g_p[P_SS].v > 0.5f && !g_ssNight) || g_p[P_SSR + 1].v > 0 || (g_lampUse > 0 && g_p[P_LAMP_SHADOW_MAPS].v > 0.5f)));
+    bool copy = live || (g_enabled && ((g_p[P_SS].v > 0.5f && !g_ssNight) || g_p[P_SSR + 1].v > 0 || (g_lampUse > 0 && g_p[P_LAMP_SHADOW_MAPS].v > 0.5f) || g_p[261].v > 0.5f));   // (1.97g: the grass's view)
     if (copy != g_cbsCopy) {
         g_cbsCopy = copy;
         for (int k = 0; k < kCbsSlots; ++k) { g_cbs[k].valid = false; g_cbs[k].keyOff = -1; }

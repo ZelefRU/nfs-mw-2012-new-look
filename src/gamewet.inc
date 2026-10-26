@@ -165,16 +165,21 @@ static ID3D11ShaderResourceView* PuddleScaled(ID3D11DeviceContext* ctx, ID3D11Sh
 }
 
 // before a draw: a road / ground shader with a puddle map -> ours (none at 0, a scaled copy between)
+static bool GrassDryDraw(ID3D11DeviceContext* ctx);   // grass.inc
 static void GameWetBefore(ID3D11DeviceContext* ctx)
 {
     float k = g_p[110].v;
-    if (!g_enabled || k >= 0.999f || g_puddlePsN == 0) return;
+    if (!g_enabled || g_puddlePsN == 0) return;
     int slot = PuddleSlotOf(g_lastPS);
-    if (slot < 0 || !PuddleEnsure()) return;
+    if (slot < 0) return;
+    // 1.97n: a lawn's draw (a terrain shader with a grass layer, the grass on): its puddles none (the game's own: its
+    // terrain shaders darken, gloss and mirror where its puddle map says; the grass stood in water)
+    bool dry = GrassDryDraw(ctx);
+    if ((k >= 0.999f && !dry) || !PuddleEnsure()) return;
     ID3D11ShaderResourceView* cur = 0;
     ctx->PSGetShaderResources(slot, 1, &cur);
     if (!cur) return;
-    ID3D11ShaderResourceView* ours = k <= 0.001f ? g_puddleDry : PuddleScaled(ctx, cur, k);
+    ID3D11ShaderResourceView* ours = dry || k <= 0.001f ? g_puddleDry : PuddleScaled(ctx, cur, k);
     if (ours) {
         g_puddleSaved = cur; g_puddleSavedSlot = slot;   // (the reference kept until put back)
         ctx->PSSetShaderResources(slot, 1, &ours);
@@ -185,6 +190,7 @@ static ID3D11RenderTargetView* g_glossRtv;
 static ID3D11Resource* g_glossRes;
 static ID3D11BlendState *g_glossBlend, *g_glossBlendAdd;
 static void RainBind(ID3D11DeviceContext* ctx);
+static void GrassSoftBind(ID3D11DeviceContext* ctx);   // grass.inc
 static void WetGlossPass(ID3D11DeviceContext* ctx, const DrawCall& d, UINT W, UINT H, ID3D11ShaderResourceView* vp)
 {
     if (!g_psWetGloss || !g_psWetGlossAdd || !g_air.normal || !g_air.depth || !vp || g_p[P_SSR + 1].v <= 0 || g_p[111].v >= 0.999f) return;
@@ -230,11 +236,14 @@ static void WetGlossPass(ID3D11DeviceContext* ctx, const DrawCall& d, UINT W, UI
     ctx->OMSetBlendState(g_glossBlend, 0, 0xffffffff);
     ID3D11ShaderResourceView* in[4] = { vp, g_air.depth, g_air.spec, g_air.diffuse };
     ctx->PSSetShaderResources(52, 4, in);
+    GrassSoftBind(ctx);   // 1.97k: the lawns soak it up (grass.inc)
+    ProfMark(ctx, PR_WETGLOSS, 0);   // (1.98b: timed)
     oPSSetShader(ctx, g_psWetGloss, 0, 0);      // the game's gloss x a
     Replay(ctx, d);
     ctx->OMSetBlendState(g_glossBlendAdd, 0, 0xffffffff);
     oPSSetShader(ctx, g_psWetGlossAdd, 0, 0);   // + b (our even wet gloss)
     Replay(ctx, d);
+    ProfMark(ctx, PR_WETGLOSS, 1);
     ID3D11ShaderResourceView* none[4] = {};
     ctx->PSSetShaderResources(52, 4, none);   // (the depth goes back to being the depth target)
     ctx->OMSetBlendState(0, 0, 0xffffffff);

@@ -57,6 +57,16 @@ static int GroupOfParam(int p)
 }
 
 // the simple view's own names (plain words); others: the setting's label
+// 1.96l: the settings added since the last release: a dot before them, easy to find (emptied at each release). 1.98:
+// orange, and kept for the experimental ones (the grass, the weather section: its switch and settings)
+static const int kNewParams[] = { 261, 262, 263, 264, 208, 209, 210, 211, 212, 213, 214, 215, 216, 237, 238 };
+static const int kExpSection = 2;   // (WEATHER: an orange dot by its name)
+static bool IsNewParam(int p)
+{
+    for (int k = 0; k < (int)(sizeof(kNewParams) / sizeof(kNewParams[0])); ++k) if (kNewParams[k] == p) return true;
+    return false;
+}
+
 static const char* SimpleLabel(int p)
 {
     switch (p) {
@@ -68,7 +78,7 @@ static const char* SimpleLabel(int p)
     case 115: return "Shadow quality (costs)"; case 116: return "Shadow reach, m (costs)"; case 114: return "Shadow softness (sun size)";
     case 6: return "Ambient occlusion"; case 62: return "Sky occlusion (costs)"; case 21: return "Bounce light (costs)";
     case 16: return "Haze"; case 19: return "Light shafts (costs)";
-    case 64: return "Reflections"; case 67: return "Reflection resolution, % (costs)";
+    case 64: return "Reflections"; case 67: return "Reflection resolution, % (costs)"; case 265: return "Sharp detail at full size";
     case 65: return "Wet ground"; case 112: return "Small puddles (mirrors)"; case 177: return "Big puddles (matte)";
     case 129: return "Parallax on roads (costs)"; case 125: return "Relief (costs)"; case 121: return "Lighting model";
     case 26: return "Lamp brightness"; case 39: return "Lamp shadows on walls (costs)"; case 44: return "Lamp light at half resolution";
@@ -128,6 +138,7 @@ static const char* ChoiceText(int idx, float v)
     case P_LOOK_PRESET: return c == 1 ? "overcast photo" : c == 2 ? "clear and punchy" : c == 3 ? "warm film" : c == 4 ? "photo (DLSS-like)" : "custom";
     case P_KNOCK: return c ? "falls with the post" : "goes out";
     case P_SKY + 14: return c <= 0 ? "25% of the screen" : c == 1 ? "50% of the screen" : c == 2 ? "80% of the screen" : "100% (full)";
+    case P_SKY_VIEWS: return c <= 0 ? "the game's sky (fastest)" : c == 1 ? "ours, without our clouds" : "ours with clouds (simpler)";
     case 237: {   // 1.89: the weather's kind
         static char b[96];
         if (c <= 0) return "by hand (rain, clouds below)";
@@ -147,7 +158,7 @@ static const ViewItem kViewList[] = {
     { 4, "shadows" }, { 33, "shadows" }, { 5, "shadows" }, { 2, "shadows" }, { 16, "shadows" }, { 17, "shadows" }, { 18, "shadows" },
     { 3, "light" }, { 7, "light" }, { 21, "light" }, { 22, "light" }, { 23, "light" }, { 8, "light" }, { 6, "light" },
     { 19, "air" }, { 20, "air" },
-    { 25, "surfaces" }, { 26, "surfaces" }, { 27, "surfaces" }, { 34, "surfaces" }, { 35, "surfaces" }, { 36, "surfaces" }, { 37, "surfaces" },
+    { 25, "surfaces" }, { 26, "surfaces" }, { 27, "surfaces" }, { 34, "surfaces" }, { 35, "surfaces" }, { 36, "surfaces" }, { 37, "surfaces" }, { 38, "surfaces" },
     { 28, "reflections" }, { 29, "reflections" }, { 30, "reflections" }, { 31, "reflections" }, { 32, "reflections" },
 };
 static const int kViewListCount = sizeof(kViewList) / sizeof(kViewList[0]);
@@ -177,14 +188,14 @@ static void MSegAdd(COLORREF c, const char* fmt, ...)
 
 static const COLORREF C_TITLE = RGB(245, 245, 245), C_ON = RGB(90, 225, 120), C_OFF = RGB(235, 95, 85), C_GROUP = RGB(110, 190, 255),
                       C_ITEM = RGB(205, 205, 205), C_SEL = RGB(255, 215, 90), C_HINT = RGB(135, 165, 195), C_DIM = RGB(125, 125, 125),
-                      C_MSG = RGB(255, 190, 110), C_OBJ = RGB(240, 160, 90);
+                      C_MSG = RGB(255, 190, 110), C_OBJ = RGB(240, 160, 90), C_EXP = RGB(255, 160, 40);
 
 static void BuildMenu()
 {
     g_mlN = 0;
     // ---- title
     MNew();
-    MSegAdd(C_TITLE, "NewLook 1.96h  ");
+    MSegAdd(C_TITLE, "NewLook 1.98   ");
     MSegAdd(g_enabled ? C_ON : C_OFF, g_enabled ? "[ ON ]" : "[ OFF - the game's own picture ]");
     MSegAdd(C_DIM, "  Y      ");
     MSegAdd(C_TITLE, "view: ");
@@ -218,7 +229,12 @@ static void BuildMenu()
             bool secOn = s < 0 || g_p[P_SEC0 + s].v > 0.5f;
             if (s >= 0 && adv) {
                 MNew();
-                MSegAdd(C_GROUP, "%s %-40s", open ? "[-]" : "[+]", kSec[s].name);
+                if (s == kExpSection) {
+                    int pad = 40 - 2 - (int)strlen(kSec[s].name);
+                    MSegAdd(C_GROUP, "%s %s ", open ? "[-]" : "[+]", kSec[s].name);
+                    MSegAdd(C_EXP, "\x95");
+                    MSegAdd(C_GROUP, "%*s", pad > 0 ? pad : 0, "");
+                } else MSegAdd(C_GROUP, "%s %-40s", open ? "[-]" : "[+]", kSec[s].name);
                 MSegAdd(secOn ? C_ON : C_OFF, "%s", secOn ? "ON" : "OFF");
                 if (g_qbCost[s] > -1e8f) MSegAdd(g_qbCost[s] > 2 ? C_OFF : C_DIM, "   %s", QbCostText(s));
                 if (!open) continue;
@@ -242,7 +258,11 @@ static void BuildMenu()
                 MNew();
                 if (head) MSegAdd(sel ? C_SEL : C_GROUP, "%s %-40s", sel ? ">" : " ", kSec[s].name);
                 else if (SecOf(idx) >= 0) MSegAdd(sel ? C_SEL : C_ITEM, "  %s %-34s", sel ? ">" : " ", "the whole section");
-                else MSegAdd(sel ? C_SEL : dim ? C_DIM : C_ITEM, "%s%s %-34s", adv || s < 0 ? "  " : "      ", sel ? ">" : " ", adv ? P.label : SimpleLabel(idx));
+                else {
+                    const char* ind = adv || s < 0 ? "  " : "      ";
+                    if (IsNewParam(idx)) { MSegAdd(C_EXP, "%.*s\x95", (int)strlen(ind) - 1, ind); ind = ""; }   // (cp1251 / 1252: a bullet)
+                    MSegAdd(sel ? C_SEL : dim ? C_DIM : C_ITEM, "%s%s %-34s", ind, sel ? ">" : " ", adv ? P.label : SimpleLabel(idx));
+                }
                 const char* ch = ChoiceText(idx, uv);
                 if (ch) MSegAdd(dim ? C_DIM : !strcmp(ch, "OFF") ? C_OFF : !strncmp(ch, "ON", 2) ? C_ON : (sel ? C_SEL : C_ITEM), "%s", ch);
                 else MSegAdd(dim ? C_DIM : sel ? C_SEL : C_ITEM, "%.2f", uv);
@@ -333,7 +353,7 @@ static void BuildMenu()
         MLINE(C_HINT, "      Ctrl+B benchmark: what costs how much here, day and night (2-3 min; park the car, hands off; B stops)");
     } else {
         MLINE(C_HINT, "keys: I/O select   Shift+I/O section   K/L change   J default   H save all   P hide   Shift+P reload   Shift+U capture   U views");
-        MLINE(C_HINT, "bench: Ctrl+B quick (sections, day / night / rain, 2-3 min)   Shift+B the selected setting   B stops");
+        MLINE(C_HINT, "bench: Ctrl+B quick (sections, 2-3 min)   Ctrl+Shift+B passes (3 min)   Shift+B the selected setting   B stops");
     }
     if (g_view == 24) {
         MLINE(C_HINT, "editor: LMB select / drag   Shift+J or Del delete");

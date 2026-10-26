@@ -1250,8 +1250,8 @@ static void FlareBefore(ID3D11DeviceContext* ctx)
         c[15] = g_moonDisc[3] > 0.01f ? 1.0f : 0.0f;
         // 1.92: our clouds (sky.inc): their shadow map, the thick deck (as the sky's CloudDeck)
         bool skyOn = g_enabled && g_p[P_SKY].v >= 0.5f;
-        float cover = skyOn ? g_p[P_SKY + 2].v : 0.0f, deck = (cover - 0.75f) / 0.2f, sk = g_p[236].v;
-        deck = (deck < 0 ? 0 : deck > 1 ? 1 : deck) * (0.6f + 0.4f * g_p[P_SKY + 11].v);
+        float cover = skyOn ? g_p[P_SKY + 2].v : 0.0f, deck = (cover - 0.6f) / 0.35f, sk = g_p[236].v;
+        deck = deck < 0 ? 0 : deck > 1 ? 1 : deck;   // (1.98x: as SunDeck; 1.98aa: from 0.6)
         c[16] = g_csOrigin[0]; c[17] = g_csOrigin[2]; c[18] = g_csOrigin[1];
         c[19] = skyOn && cover > 0 && g_p[P_SKY + 8].v > 0 && g_csSrv && g_csOk ? kCsTexel : 0.0f;
         c[20] = 1 + (sk * sk - 1) * deck; c[21] = c[22] = c[23] = 0;
@@ -2113,8 +2113,8 @@ static bool SsAfterDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     ID3D11Resource* res = DrawDsv(ctx, &dsv);
     // GPU time of the whole shadow pass (the game's and ours): from its first draw to the first draw after it
     bool shadowDraw = dsv && res == g_sunShadowTex;
-    if (shadowDraw && g_ssPassFrame != g_frame + 1) { g_ssPassFrame = g_frame + 1; g_ssPassOpen = true; ProfMark(ctx, PR_SHPASS, 0); }
-    else if (!shadowDraw && g_ssPassOpen) { g_ssPassOpen = false; SsFlush(ctx); ProfMark(ctx, PR_SHPASS, 1); }
+    if (shadowDraw && g_ssPassFrame != g_frame + 1) { g_ssPassFrame = g_frame + 1; g_ssPassOpen = true; FmMark(ctx, FM_SHADOW); ProfMark(ctx, PR_SHPASS, 0); }
+    else if (!shadowDraw && g_ssPassOpen) { g_ssPassOpen = false; SsFlush(ctx); ProfMark(ctx, PR_SHPASS, 1); FmMark(ctx, FM_SHADOW_END); }
     if (!shadowDraw || g_p[P_SS].v < 0.5f || g_ssFailed || g_ssNight) { return false; }
     D3D11_VIEWPORT vp; UINT nv = 1;
     ctx->RSGetViewports(&nv, &vp);

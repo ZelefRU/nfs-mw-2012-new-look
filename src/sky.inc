@@ -35,6 +35,11 @@ cbuffer SkyCB : register(b11) { float4 SK0, SK1, SK2, SK3, SK4, SK5, SK6, SK7, S
 // SK12.x (1.89): how much of the sun a thick cloud deck lets through (SkyOvercastSun; 1: as before)
 // a thick deck (1.89): full cover (rain clouds: more), 0 under ~75%
 float CloudDeck() { return saturate((SK0.y - 0.75) / 0.2) * (0.6 + 0.4 * SK4.z); }
+// 1.98x: how much of the sun a thick deck takes, by the cover alone: a full cover (0.95) is a deck with rain clouds or
+// without (CloudDeck's rain part let 26 % of the sun through an overcast at full cover: the walls lit as by it, the user);
+// the light under it (its colour, its spread, the sun through it) by this, the clouds' own shape by CloudDeck
+// 1.98aa: from 0.6 (was 0.75): the sun went from half to none between 0.85 and 0.95, its shadows there and then gone (the user)
+float SunDeck() { return saturate((SK0.y - 0.6) / 0.35); }
 // SK10 (1.29): our sun (SunPath): towards it (the light's direction); w: by day 1 (0: the game's key light: the moon)
 Texture2D<float> tCloudShadow : register(t50);   // the cloud-shadow map (transmittance)
 // SK0: game clouds more, cover, cloud brightness, time (s)      SK1: city glow colour, strength
@@ -111,7 +116,11 @@ float CloudShadow(float3 world, float3 toSun, SamplerState s)
 )HLSL";
 
 static const char* kSkyMain = R"HLSL(
+#ifdef SKY_SEC   // 1.98l: the game's sky shader with a second cloud layer: its SunColour one further on
+cbuffer gObjectCB : register(b1) { float4 BaseCloudColour, CloudParamsPS, CloudParamsPS2, KeyLightDir, SecondaryCloudColour, SunColour; };
+#else
 cbuffer gObjectCB : register(b1) { float4 BaseCloudColour, CloudParamsPS, CloudParamsPS2, KeyLightDir, SunColour; };
+#endif
 Texture2D t0 : register(t0); Texture2D t1 : register(t1); Texture2D t2 : register(t2); Texture2D t3 : register(t3);
 Texture1D tGA : register(t5); Texture1D tGB : register(t6);
 Texture2D tClouds : register(t10);   // the cloud pass (a quarter of the size): rgb light, a transmittance
@@ -120,6 +129,7 @@ Buffer<float4> tVPPrev : register(t12);   // the last frame's
 Texture2D tHist : register(t13);      // the cloud pass's last result
 Texture2D tMarch : register(t14);     // this frame's march (an eighth of the size)
 Texture2D<float> tSceneDepth : register(t15);   // the game's depth (this frame's scene is drawn before the sky)
+TextureCube tSkyProbe : register(t16);   // 1.98m: our sky all around with our clouds (the sky probe): the game's reflections'
 SamplerState sP : register(s9);
 SamplerState s0 : register(s0); SamplerState s1 : register(s1); SamplerState s2 : register(s2); SamplerState s3 : register(s3);
 SamplerState s5 : register(s5); SamplerState s6 : register(s6); SamplerState sW : register(s7); SamplerState sL : register(s8);
@@ -149,6 +159,17 @@ SkyIn Setup(PSIn i)
     // clock past its sun) darker and cooler, no sun on the clouds; the city's glow and the stars come
     float on = SK9.y;
     s.grad = lerp(s.grad, Lum(s.grad) * float3(0.55, 0.65, 1.0) * 0.22, on);
+    // 1.98s / 1.98t: under a thick deck (overcast, storm) the sky's colour (and the clouds' light from it) the deck's: the
+    // game's gradient (its sky VS: by |height| from the horizon (0) up, toward the sun (A) / away (B)) is a clear sky's,
+    // a sunset's pink and its bright horizon whatever the cover; its mean over the whole dome instead, grey
+    float dkG = SunDeck();
+    if (dkG > 0) {
+        float3 ga = 0;
+        [unroll] for (int gk = 0; gk < 5; ++gk) ga += tGA.SampleLevel(s5, 0.1 + 0.2 * gk, 0).rgb + tGB.SampleLevel(s6, 0.1 + 0.2 * gk, 0).rgb;
+        ga *= 0.1;
+        ga = lerp(ga, Lum(ga) * float3(0.55, 0.65, 1.0) * 0.22, on);
+        s.grad = lerp(s.grad, Lum(ga) * float3(0.92, 0.95, 1.0), dkG * 0.9);
+    }
     s.day = min(s.day, 1 - on);
     s.night = 1 - s.day;
     s.city = SK1.rgb * SK1.w * s.night;
@@ -174,7 +195,7 @@ float4 clouds(PSIn i) : SV_Target
         float z = max(max(tSceneDepth.SampleLevel(sP, c + float2(-e.x, -e.y), 0), tSceneDepth.SampleLevel(sP, c + float2(e.x, -e.y), 0)),
                       max(tSceneDepth.SampleLevel(sP, c + float2(-e.x, e.y), 0), tSceneDepth.SampleLevel(sP, c + float2(e.x, e.y), 0)));
         z = max(z, tSceneDepth.SampleLevel(sP, c, 0));
-        if (z < 0.99999) return float4(0, 0, 0, 1);
+        if (z < 0.99999) return float4(0, 0, 0, 1.0009765625);   // (1.96o: marked as hidden for the resolve)
     }
     SkyIn s = Setup(i);
     float3 d = s.d, L = s.L, cam = tVP.Load(7).xyz;   // the camera now (the dome's centre)
@@ -193,13 +214,14 @@ float4 clouds(PSIn i) : SV_Target
         Tall = 1 - a;
     }
     // the volumetric clouds (in front of the cirrus)
+    float fadeF = 0;   // (1.98s: how much of them the march shows here)
     if (SK0.y > 0 && el > 0.003 && cam.y < CL0) {
         float t0 = (CL0 - cam.y) / el, t1 = min((CL1 - cam.y) / el, t0 + 30000);
         CLD = saturate(1.6 - t0 / 9000);   // full detail to ~5 km, none past ~14 km
         float q = SK4.w;
         float big = lerp(300, 150, q), small = lerp(80, 40, q);
         int maxIt = (int)lerp(72, 160, q);
-        float deck = CloudDeck(), sunK = lerp(1, SK12.x, deck);
+        float deck = CloudDeck(), sunK = lerp(1, SK12.x, SunDeck());
         float sigma = 0.012 * (1 + SK4.z * 1.2) * (1 + 0.8 * deck * (1 - SK12.x));   // (1.89: a thick deck: denser)
         float t = t0 + big * jit;
         float T = 1;
@@ -243,8 +265,9 @@ float4 clouds(PSIn i) : SV_Target
                 float powder = 1 - exp(-den * small * sigma * 2.5);
                 float pw = lerp(1, powder, saturate(0.8 - s.cosT * 0.6));    // dark edges of thick parts, not against the sun
                 // the sky's light: less inside and under a lot of cloud (one look up)
-                float up = CloudDensity(P + float3(0, 280, 0), true, sW);
-                float ambV = exp(-up * 280 * sigma * 0.5);
+                // (1.98b: not at night (SK9.y, our night): the sky's light there is the city's faint glow)
+                float ambV = 0.8;
+                if (SK9.y < 0.8) { float up = CloudDensity(P + float3(0, 280, 0), true, sW); ambV = exp(-up * 280 * sigma * 0.5); }
                 float h = saturate((P.y - CL0) / (CL1 - CL0) * 3);
                 // (1.89: under a thick deck the sun's light is spread (no bright patch round it) and weaker: SkyOvercastSun)
                 float3 Li = s.sunC * ms * pw * 2.2 * sunK + lerp(s.ambBot, s.ambTop, h) * (0.6 + 0.4 * ambV);
@@ -259,6 +282,17 @@ float4 clouds(PSIn i) : SV_Target
         T = lerp(1, T, fade);
         col = col * T + vc * fade;
         Tall *= T;
+        fadeF = fade;
+    }
+    // 1.98s: under a thick deck what the march leaves out (faded past ~60 km and toward the horizon, none under 3 deg
+    // and below it) is the deck too, far off: its grey, not the game's sky through it (in a storm the map's edge glowed
+    // as at sunset and lit the city, the user)
+    float dk = SunDeck();
+    if (dk > 0 && SK0.y > 0) {
+        float lost = (1 - fadeF) * dk;
+        float3 deckC = s.ambBot * 0.65 + s.ambTop * 0.05 + s.sunC * lerp(1, SK12.x, dk) * 0.3;   // (1.98t: as its base seen from below: was brighter)
+        col += Tall * lost * deckC;
+        Tall *= 1 - lost;
     }
     return float4(col * SK0.z, Tall);
 }
@@ -291,17 +325,26 @@ float4 resolve(PSIn i) : SV_Target
         float4 n = tMarch.Load(int3(mp + int2(x, y), 0));
         lo = min(lo, n); hi = max(hi, n);
     }
+    // 1.96o: all of the march round it behind the city (its mark): no sky drawn anywhere near, nothing to reproject (the
+    // history it leaves is clamped to the march's neighbourhood when the sky shows there again, as before)
+    if (lo.a > 1.0005) return float4(0, 0, 0, 1);
+    hi.a = min(hi.a, 1); m.a = min(m.a, 1);
     float4 cur = mine ? m : tMarch.SampleLevel(sL, (i.pos.xy - SK7.yz + 0.5) * SK7.w * float2(1, SK8.x), 0);
+    cur.a = min(cur.a, 1);
     float3 d = normalize(i.t0.xyz);
     if (SK7.x > 0.5) {
-        float3 P = tVPPrev.Load(7).xyz + d * 400;
+        // 1.96i: reprojected at the clouds' base along this direction (was 400 m for all: overhead the clouds are 1.5 km
+        // up, their history slid as the camera moved and was thrown away: noise straight above)
+        float3 cp = tVPPrev.Load(7).xyz;
+        float dc = d.y > 0.003 && cp.y < CL0 ? clamp((CL0 - cp.y) / d.y, 400, 30000) : 400;
+        float3 P = cp + d * dc;
         float4 c = P.x * tVPPrev.Load(0) + P.y * tVPPrev.Load(1) + P.z * tVPPrev.Load(2) + tVPPrev.Load(3);
         float2 uv = float2(c.x / c.w * 0.5 + 0.5, 0.5 - c.y / c.w * 0.5);
         if (c.w > 0 && all(uv > 0.002) && all(uv < 0.998)) {
             float4 h = SampleCR(tHist, uv);
             float4 pad = (hi - lo) * 0.25 + float4(0.002, 0.002, 0.002, 0.02);
             h = clamp(h, lo - pad, hi + pad);
-            return mine ? lerp(h, m, 0.35) : h;
+            return mine ? lerp(h, m, 0.25) : h;   // (1.96i: 0.35: the march's grain overhead showed)
         }
     }
     return cur;   // nothing to reproject: this frame's
@@ -315,17 +358,27 @@ float shadowmap(PSIn i) : SV_Target
     return CloudShadowCalc(float3(g.x, SK6.z, g.y), L, sW);
 }
 
+)HLSL"   // (1.98k: two pieces: MSVC's limit on one literal)
+R"HLSL(
 // ---- the sky draw
 float4 main(PSIn i) : SV_Target
 {
     SkyIn s = Setup(i);
     float3 d = s.d;
     float el = d.y;
+    // 1.98m: no cloud picture of ours here (the game's reflections, SkyViews 1): our sky from the probe, our clouds in it
+    // (the car reflected no clouds at all, the user)
+    if (SK12.z > 0.5 && SK5.z < 0.5) return float4(tSkyProbe.SampleLevel(sW, d, 0).rgb, 1);
     // the game's sky (its glow in the true direction)
-    float sunK = lerp(1, SK12.x, CloudDeck());   // (1.89: the sun's glow and disc behind a thick deck: weaker)
+    float sunK = lerp(1, SK12.x, SunDeck());   // (1.89: the sun's glow and disc behind a thick deck: weaker)
+    // 1.98k: no cloud picture of ours here (the game's reflections, SkyViews 1): its cloud layers fade with our cover and
+    // the sky goes the deck's grey (a storm's sky was reflected in the car with the game's clear-day clouds drifting);
+    // 1.98l: the sun's glow and disc and the moon's too (none of our clouds hid them: the sun glinted in the car in a storm)
+    float hideG = SK5.z < 0.5 && SK2.w > 0.5 ? saturate((SK0.y - 0.3) / 0.5) : 0;
+    sunK *= 1 - hideG;
     float3 sky = pow(saturate(dot(d, s.L)), SunColour.w) * SunColour.rgb * (1 - SK9.y) * sunK + s.grad * BaseCloudColour.w;
     float ov = saturate((SK0.y - 0.55) / 0.45) * saturate(SK0.y * 2);   // heavy cover: the light comes through grey
-    sky = lerp(sky, Lum(sky) * float3(0.92, 0.95, 1.0) * (0.9 - SK4.z * 0.35), ov * 0.8);
+    sky = lerp(sky, Lum(sky) * float3(0.92, 0.95, 1.0) * (0.9 - SK4.z * 0.35), max(ov * 0.8, SunDeck()));   // (1.98s: a deck: all grey)
     sky += s.city * exp(-max(el, 0) * 7) * 0.6;
     // 1.35: our sun's disc (SK9.z its strength, w warmth; towards SK10) and the moon's (SK11): the game's sprite is not drawn
     if (SK9.z > 0) {
@@ -334,7 +387,7 @@ float4 main(PSIn i) : SV_Target
     }
     if (SK11.w > 0) {
         float c = dot(d, SK11.xyz);
-        sky += float3(0.8, 0.86, 1) * SK11.w * (smoothstep(0.9999692, 0.9999813, c) + pow(saturate(c), 4000) * 0.15);
+        sky += float3(0.8, 0.86, 1) * SK11.w * (1 - hideG) * (smoothstep(0.9999692, 0.9999813, c) + pow(saturate(c), 4000) * 0.15);
     }
     // stars: high up, at night
     if (SK2.x > 0 && s.night > 0 && el > 0.05) {
@@ -353,10 +406,11 @@ float4 main(PSIn i) : SV_Target
     float sharp = CloudParamsPS2.y;
     float4 thr = CloudParamsPS - SK0.x * 0.6;
     float4 c;
-    c = t0.Sample(s0, i.t1.xy); sky = lerp(sky, c.rgb * cc, saturate((c.a - thr.x) * sharp));
-    c = t1.Sample(s1, i.t1.zw); sky = lerp(sky, c.rgb * cc, saturate((c.a - thr.y) * sharp));
-    c = t2.Sample(s2, i.t2.xy); sky = lerp(sky, c.rgb * cc, saturate((c.a - thr.z) * sharp));
-    c = t3.Sample(s3, i.t2.zw); sky = lerp(sky, c.rgb * cc, saturate((c.a - thr.w) * sharp));
+    c = t0.Sample(s0, i.t1.xy); sky = lerp(sky, c.rgb * cc, saturate((c.a - thr.x) * sharp) * (1 - hideG));
+    c = t1.Sample(s1, i.t1.zw); sky = lerp(sky, c.rgb * cc, saturate((c.a - thr.y) * sharp) * (1 - hideG));
+    c = t2.Sample(s2, i.t2.xy); sky = lerp(sky, c.rgb * cc, saturate((c.a - thr.z) * sharp) * (1 - hideG));
+    c = t3.Sample(s3, i.t2.zw); sky = lerp(sky, c.rgb * cc, saturate((c.a - thr.w) * sharp) * (1 - hideG));
+    sky = lerp(sky, Lum(sky) * float3(0.85, 0.9, 1.0) * (0.75 - SK4.z * 0.35), hideG * 0.7);
     // our clouds, from the cloud pass (a quarter of the size: sharp upsampling)
     if (SK5.z > 0.5) {
         float4 cl = SampleCR(tClouds, i.pos.xy * SK5.xy);
@@ -368,29 +422,33 @@ float4 main(PSIn i) : SV_Target
 
 static const char* CloudCommonSrc() { return kCloudCommon; }
 
-static ID3D11PixelShader *g_skyPS, *g_cloudPS;
-static ID3D11Texture2D* g_cloudTex;
-static ID3D11RenderTargetView* g_cloudRtv;
-static ID3D11ShaderResourceView* g_cloudSrv;
-static UINT g_cloudW, g_cloudH;
+static ID3D11PixelShader *g_skyPS, *g_cloudPS;   // (1.98l: the variant for the game's shader being replaced)
+static ID3D11PixelShader *g_skyPSk[2], *g_cloudPSk[2], *g_csPSk[2], *g_resolvePSk[2];   // [1] for its second-layer one
+static bool g_skyGameSec[8];   // the game's sky shader of g_skyGame has a second cloud layer
+// 1.98h: a view's cloud pictures. The game draws its sky in 3 views a frame (the main one and two of other sizes, its
+// reflections'): one set of targets for all was made anew at each (~3 a frame: "cloud targets made" in the log) and
+// never had a last frame to blend with. Now the main view's set is its own, the others' each theirs (found by size).
+struct CloudSet {
+    ID3D11Texture2D* tex[2]; ID3D11RenderTargetView* rtv[2]; ID3D11ShaderResourceView* srv[2];   // the picture: by turns this frame's / the last
+    ID3D11Texture2D* cmTex; ID3D11RenderTargetView* cmRtv; ID3D11ShaderResourceView* cmSrv;           // the march (an eighth of the size)
+    ID3D11Buffer* vpBuf[2]; ID3D11ShaderResourceView* vpSrv[2];   // the sky VS's viewProjection + world, this frame / the last
+    UINT vw, vh;      // the view's size
+    UINT w, h, cmW, cmH;
+    int cur;          // which target is this frame's
+    bool hist;        // the other holds a usable result
+    unsigned used;    // the frame it was last drawn in
+};
+static CloudSet g_cls[3];            // [0] the main view's; [1], [2] the game's other views'
+static CloudSet* g_cl = &g_cls[0];   // the one being drawn (SkyFill)
+static bool g_clOther;               // it is an other view's (SkyFill: the lowest quality, no depth test)
+static ID3D11PixelShader* g_skyGamePS;   // the game's sky shader just swapped for ours (SkyViews 0: put back there)
 static bool g_csOk;   // the shadow map was made (this or a recent frame)
 static ID3D11PixelShader* g_csPS;          // the cloud-shadow map
 static ID3D11PixelShader* g_resolvePS;     // the cloud picture from the march + the last one
-static ID3D11Texture2D* g_cmTex;           // the march (an eighth of the size)
-static ID3D11RenderTargetView* g_cmRtv;
-static ID3D11ShaderResourceView* g_cmSrv;
-static UINT g_cmW, g_cmH;
 static bool g_skyDepthOk;   // the depth is bound for the march
 static ID3D11Texture2D* g_csTex;
 static ID3D11RenderTargetView* g_csRtv;
 static ID3D11ShaderResourceView* g_csSrv;
-static ID3D11Texture2D* g_cloudTex2;         // the cloud pass's other target (history)
-static ID3D11RenderTargetView* g_cloudRtv2;
-static ID3D11ShaderResourceView* g_cloudSrv2;
-static ID3D11Buffer* g_vpBuf[2];              // the sky VS's viewProjection + world, this frame / the last
-static ID3D11ShaderResourceView* g_vpSrv[2];
-static int g_cloudCur;                        // which target is this frame's
-static bool g_cloudHist;                      // the other holds a usable result
 static float g_csOrigin[3];
 static const float kCsTexel = 25;             // m a texel of the shadow map (256: 6.4 km)
 // 1.93: our clouds between the camera and the sun, for the game's corona (sunshadow.inc): the shadow map's texel there
@@ -439,8 +497,8 @@ static void CsSunHere(ID3D11DeviceContext* ctx)
 static float SkyDeckSunK()
 {
     bool on = g_enabled && g_p[P_SKY].v >= 0.5f;
-    float cover = on ? g_p[P_SKY + 2].v : 0.0f, deck = (cover - 0.75f) / 0.2f, sk = g_p[236].v;
-    deck = (deck < 0 ? 0 : deck > 1 ? 1 : deck) * (0.6f + 0.4f * g_p[P_SKY + 11].v);
+    float cover = on ? g_p[P_SKY + 2].v : 0.0f, deck = (cover - 0.6f) / 0.35f, sk = g_p[236].v;
+    deck = deck < 0 ? 0 : deck > 1 ? 1 : deck;   // (1.98x: as SunDeck: the cover alone; 1.98aa: from 0.6)
     return 1 + (sk * sk - 1) * deck;
 }
 static ID3D11Buffer* g_skyCb;
@@ -460,9 +518,11 @@ static void SkyNoteGame(const void* code, SIZE_T size, ID3D11PixelShader* ps, co
     D3D11_SHADER_DESC sd;
     r->GetDesc(&sd);
     r->Release();
-    if (sec || !ga || sd.InputParameters != 5) return;
+    if (!ga || sd.InputParameters != 5) return;
+    // 1.98l: its second-layer one too (the same inputs; SecondaryCloudColour before SunColour): it drew the game's own
+    // clouds where ours were not (the car's reflections in a storm: the game's clouds drifting there, the user)
     LONG k = InterlockedIncrement(&g_skyGameN) - 1;
-    if (k < 8) { g_skyGame[k] = ps; Log("sky: the game's sky shader %p (replaced by ours)", ps); } else g_skyGameN = 8;
+    if (k < 8) { g_skyGameSec[k] = sec; g_skyGame[k] = ps; Log("sky: the game's sky shader %p%s (replaced by ours)", ps, sec ? ", a second cloud layer" : ""); } else g_skyGameN = 8;
 }
 
 // ---- tiling noises
@@ -578,25 +638,30 @@ static void SkyCompile()
     strcpy(src, kCloudCommon);
     strcat(src, kSkyMain);
     static const char* entry[4] = { "main", "clouds", "shadowmap", "resolve" };
-    ID3D11PixelShader** out[4] = { &g_skyPS, &g_cloudPS, &g_csPS, &g_resolvePS };
-    for (int e = 0; e < 4; ++e) {
-        ID3DBlob *code = 0, *err = 0;
-        if (SUCCEEDED(g_compile(src, strlen(src), "sky", 0, 0, entry[e], "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &err)))
-            g_dev->CreatePixelShader(code->GetBufferPointer(), code->GetBufferSize(), 0, out[e]);
-        else Log("sky shader %s: %s", entry[e], err ? (const char*)err->GetBufferPointer() : "failed");
-        if (code) code->Release();
-        if (err) err->Release();
+    static const D3D_SHADER_MACRO sec[2] = { { "SKY_SEC", "1" }, { 0, 0 } };
+    for (int v = 0; v < 2; ++v) {   // (1.98l: [1] for the game's second-layer sky shader)
+        ID3D11PixelShader** out[4] = { &g_skyPSk[v], &g_cloudPSk[v], &g_csPSk[v], &g_resolvePSk[v] };
+        for (int e = 0; e < 4; ++e) {
+            ID3DBlob *code = 0, *err = 0;
+            if (SUCCEEDED(g_compile(src, strlen(src), "sky", v ? sec : 0, 0, entry[e], "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &err)))
+                g_dev->CreatePixelShader(code->GetBufferPointer(), code->GetBufferSize(), 0, out[e]);
+            else Log("sky shader %s%s: %s", entry[e], v ? " (second layer)" : "", err ? (const char*)err->GetBufferPointer() : "failed");
+            if (code) code->Release();
+            if (err) err->Release();
+        }
     }
+    g_skyPS = g_skyPSk[0]; g_cloudPS = g_cloudPSk[0]; g_csPS = g_csPSk[0]; g_resolvePS = g_resolvePSk[0];
     free(src);
     D3D11_BUFFER_DESC bd = {};
     bd.ByteWidth = 208; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     g_dev->CreateBuffer(&bd, 0, &g_skyCb);
-    for (int k = 0; k < 2; ++k) {
+    for (int k = 0; k < 6; ++k) {   // (1.98h: each view's set its own)
+        CloudSet& cs = g_cls[k / 2];
         D3D11_BUFFER_DESC vb = {};
         vb.ByteWidth = 128; vb.Usage = D3D11_USAGE_DEFAULT; vb.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
         sv.Format = DXGI_FORMAT_R32G32B32A32_FLOAT; sv.ViewDimension = D3D11_SRV_DIMENSION_BUFFER; sv.Buffer.NumElements = 8;
-        if (SUCCEEDED(g_dev->CreateBuffer(&vb, 0, &g_vpBuf[k]))) g_dev->CreateShaderResourceView(g_vpBuf[k], &sv, &g_vpSrv[k]);
+        if (SUCCEEDED(g_dev->CreateBuffer(&vb, 0, &cs.vpBuf[k & 1]))) g_dev->CreateShaderResourceView(cs.vpBuf[k & 1], &sv, &cs.vpSrv[k & 1]);
     }
     {
         D3D11_TEXTURE2D_DESC td = {};
@@ -670,18 +735,26 @@ static bool SkyFill(ID3D11DeviceContext* ctx, UINT w = 0, UINT h = 0, ID3D11Buff
         g_p[P_SKY + 9].v, g_p[P_SKY + 10].v, g_p[P_SKY + 11].v, g_p[P_SKY + 13].v,
         w ? 1.0f / w : 0, h ? 1.0f / h : 0, w ? 1.0f : 0.0f, (float)(g_frame & 3),
         g_csOrigin[0], g_csOrigin[2], g_csOrigin[1], g_csSrv && g_csOk ? kCsTexel : 0.0f,
-        g_cloudHist ? 1.0f : 0.0f, (float)(g_frame & 1), (float)((g_frame >> 1) & 1), g_cloudW ? 1.0f / (2 * ((g_cloudW + 1) / 2)) : 0.0f,
-        g_cloudW ? (float)(2 * ((g_cloudW + 1) / 2)) / (2 * ((g_cloudH + 1) / 2)) : 1.0f, (float)((g_frame >> 2) & 1023), g_cloudW ? 1.0f / g_cloudW : 0.0f, g_cloudH ? 1.0f / g_cloudH : 0.0f,
-        g_air.depth && g_skyDepthOk ? 1.0f : 0.0f, g_sunActive && g_p[P_SKY_NIGHT].v > 0.5f ? g_nightF : 0.0f,   // (SK9.y: our night)
+        g_cl->hist ? 1.0f : 0.0f, (float)(g_frame & 1), (float)((g_frame >> 1) & 1), g_cl->w ? 1.0f / (2 * ((g_cl->w + 1) / 2)) : 0.0f,
+        g_cl->w ? (float)(2 * ((g_cl->w + 1) / 2)) / (2 * ((g_cl->h + 1) / 2)) : 1.0f, (float)((g_frame >> 2) & 1023), g_cl->w ? 1.0f / g_cl->w : 0.0f, g_cl->h ? 1.0f / g_cl->h : 0.0f,
+        !g_clOther && g_air.depth && g_skyDepthOk ? 1.0f : 0.0f, g_sunActive && g_p[P_SKY_NIGHT].v > 0.5f ? g_nightF : 0.0f,   // (SK9.y: our night)
         g_sunActive && g_sunG < 0.5f ? g_sunDisc[0] : 0.0f, g_sunDisc[1],                                         // (SK9.zw: our sun's disc)
         -g_sunSky[0], -g_sunSky[1], -g_sunSky[2], g_sunActive ? 1 - g_sunG : 0.0f,     // (1.33: the sun, at night under the horizon)
         g_moonDisc[0], g_moonDisc[1], g_moonDisc[2], 0.0f,     // (SK11: the moon's disc: 1.37 none, the game's moon moved to ours)
-        g_p[236].v, g_p[256].v, 0, 0 };                         // (SK12.x: 1.89: the sun through a thick deck; y: 1.96f the faster march)
+        g_p[236].v, g_p[256].v, g_probeSrv && g_probeFrame && g_frame + 1 - g_probeFrame < 30 ? 1.0f : 0.0f, 0 };   // (SK12.z: 1.98m: the probe for the reflections)                         // (SK12.x: 1.89: the sun through a thick deck; y: 1.96f the faster march)
+    if (!probe) {   // 1.98b: at night the clouds hardly show (dark on a dark sky; the user, 2026-10-26): the march cheaper
+        // as it gets dark: the quality down with the night, the faster march (SkyFast) 1 past half of it, 2 past 85 %
+        float nf = g_nightF < 0 ? 0.0f : g_nightF > 1 ? 1.0f : g_nightF;
+        k[19] *= 1 - nf;
+        k[49] = fmaxf(k[49], nf > 0.85f ? 2.0f : nf > 0.5f ? 1.0f : 0.0f);
+        if (g_clOther) k[19] = 0;   // 1.98h: the game's other views (its reflections): the lowest quality (as the probe's)
+    }
     if (probe) {
         k[20] = k[21] = 1.0f / probe; k[22] = 1;   // SK5: the face's own clouds (t10)
         k[28] = 0; k[29] = k[30] = 0.5f;           // SK7: no 2x2 turn (no shift)
         k[36] = 0; k[38] = 0;                      // SK9: no depth test; no sun disc (its highlight is the sun pass's)
         k[19] = 0;                                 // SK4.w: the clouds' lowest quality (1.52: blurred in reflections anyway)
+        k[50] = 0;                                 // SK12.z: not itself
     }
     ID3D11Buffer* b = dst ? dst : g_skyCb;
     D3D11_MAPPED_SUBRESOURCE m;
@@ -778,7 +851,8 @@ static void SkyProbePass(ID3D11DeviceContext* ctx, const DrawCall& d)
     vcb->GetDesc(&bd);
     if (bd.ByteWidth < 240) { vcb->Release(); return; }
     bool all = !g_probeFrame || g_frame + 1 - g_probeFrame > 120;   // none yet / old (our sky or the reflections were off)
-    if (!all && (g_frame & 1)) { vcb->Release(); return; }   // (1.52: a face every other frame)
+    if (!all && (g_frame & 3)) { vcb->Release(); return; }   // (1.52: a face every other frame; 1.96o: every 4th: no
+                                                              // camera in it, only directions; the clouds drift slowly)
     ID3D11RasterizerState* rs = 0;
     ctx->RSGetState(&rs);
     ctx->RSSetState(g_rsNoCull);   // (a face's view may be mirrored)
@@ -824,13 +898,20 @@ static void WetGlossPass(ID3D11DeviceContext* ctx, const DrawCall& d, UINT W, UI
 // PSSetShader: the game's sky -> ours (returns what to bind)
 static ID3D11PixelShader* SkySubstitute(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps)
 {
-    if (!g_enabled || !ps || g_p[P_SKY].v < 0.5f || !Immediate(ctx)) return ps;
-    LONG n = g_skyGameN;
-    bool hit = false;
-    for (LONG i = 0; i < n && !hit; ++i) hit = g_skyGame[i] == ps;
-    if (!hit) return ps;
+    if (!ps || !Immediate(ctx)) return ps;
+    LONG n = g_skyGameN, hi = -1;
+    for (LONG i = 0; i < n && hi < 0; ++i) if (g_skyGame[i] == ps) hi = i;
+    if (hi < 0) return ps;
+    FmMark(ctx, FM_VIEW);   // 1.98h: the frame map: a view of the game's begins (its sky first; our sky off too)
+    if (!g_enabled || g_p[P_SKY].v < 0.5f) return ps;
+    if ((int)(g_p[260].v + 0.5f) == 5) return ps;   // 1.96n: SkyTest 5: the game's sky shader
+    ++g_skySubN;   // (1.98g: counted: the stats' "cpu," line)
     SkyEnsure();
-    if (!g_skyPS || !g_skyCb || !g_skyW || !g_skyS || !g_skyD) return ps;
+    int sv = g_skyGameSec[hi] ? 1 : 0;   // (1.98l: our variant for its kind)
+    if (!g_skyPSk[sv] || !g_skyCb || !g_skyW || !g_skyS || !g_skyD) return ps;
+    g_skyPS = g_skyPSk[sv]; g_cloudPS = g_cloudPSk[sv]; g_csPS = g_csPSk[sv]; g_resolvePS = g_resolvePSk[sv];
+    static bool secSeen;
+    if (sv && !secSeen) { secSeen = true; Log("sky: the game's second-layer sky shader drawn (ours instead)"); }
     static DWORD lastLog;
     if (GetTickCount() - lastLog > 30000) { lastLog = GetTickCount(); g_skyDrawLog = true; }
     SkyFill(ctx);
@@ -838,8 +919,42 @@ static ID3D11PixelShader* SkySubstitute(ID3D11DeviceContext* ctx, ID3D11PixelSha
     ID3D11ShaderResourceView* v[3] = { g_skyW, g_skyS, g_skyD };
     ctx->PSSetShaderResources(47, 3, v);
     ctx->PSSetSamplers(7, 1, &g_sWrap);
+    ctx->PSSetShaderResources(16, 1, &g_probeSrv);   // (1.98m: the reflections' sky)
     g_skyPending = g_cloudPS != 0;   // the draw: the cloud pass first (SkyBeforeDraw)
+    g_skyGamePS = ps;
     return g_skyPS;
+}
+
+// 1.98h: the views of a frame in the log now and then (their sizes; which is the main one)
+static void SkyViewNote(UINT w, UINT h, bool mainV, bool noMain)
+{
+    static unsigned frame;
+    static UINT vw[10], vh[10];
+    static bool vm[10], nm;
+    static int n;
+    static DWORD last;
+    if (frame != g_frame) {
+        if (n && GetTickCount() - last > 30000) {
+            last = GetTickCount();
+            char b[400], *p = b;
+            for (int k = 0; k < n; ++k) p += sprintf(p, "%s%ux%u %s", k ? ", " : "", vw[k], vh[k], vm[k] ? "main" : "other");
+            Log("sky: the game's views a frame (its sky draws): %s; the screen %ux%u%s; SkyViews %.0f", b, g_bbW, g_bbH,
+                nm ? " (none of its size the frame before: each as the main one)" : "", g_p[P_SKY_VIEWS].v);
+        }
+        frame = g_frame; n = 0; nm = noMain;
+    }
+    if (n < 10) { vw[n] = w; vh[n] = h; vm[n] = mainV; ++n; }
+}
+// an other view's set: the one of its size, else the longest unused
+static CloudSet* SkyOtherSet(UINT w, UINT h)
+{
+    CloudSet* old = &g_cls[1];
+    for (int k = 1; k < 3; ++k) {
+        if (g_cls[k].vw == w && g_cls[k].vh == h) return &g_cls[k];
+        if (g_cls[k].used < old->used) old = &g_cls[k];
+    }
+    old->vw = w; old->vh = h;
+    return old;
 }
 
 // before the sky draw (our shader bound): the same draw into the cloud target, a quarter of the size, with the cloud
@@ -852,6 +967,7 @@ static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
     ctx->PSGetShader(&cur, 0, 0);
     if (cur) cur->Release();
     if (cur != g_skyPS) return;
+    ++g_skyBeforeN;   // (1.98g: counted)
     ID3D11RenderTargetView* rt[8] = {};
     ID3D11DepthStencilView* ds = 0;
     ctx->OMGetRenderTargets(8, rt, &ds);
@@ -861,52 +977,88 @@ static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
         ID3D11Texture2D* t = 0; if (r) { r->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t); r->Release(); }
         if (t) { D3D11_TEXTURE2D_DESC td; t->GetDesc(&td); W = td.Width; H = td.Height; t->Release(); }
     }
+    // 1.98h: the main view: the first of the screen's size a frame (1.98i: as MainTarget: g_rtW is the last sun pass's,
+    // its reflections' too, so none matched it and each was taken as the main one); the others (its reflections') by SkyViews:
+    // 0 the game's own sky, 1 ours without our clouds, 2 ours with them at the lowest quality, no history, no depth test
+    // (the depth bound is the main view's), none of the main view's extras (the cloud shadows, the probe, the wet gloss)
+    static unsigned mainFrame, seenFrame;
+    static bool mainSeen, noMain;
+    if (seenFrame != g_frame) {   // (no view of the picture's size last frame: all as the main one, as before 1.98h)
+        bool nm = seenFrame + 1 == g_frame && !mainSeen;
+        if (nm && !noMain) Log("sky: no view of the screen's size (%ux%u) last frame: each as the main one", g_bbW, g_bbH);
+        noMain = nm; seenFrame = g_frame; mainSeen = false;
+    }
+    bool isMain = W && !(g_bbW && W + 8 < g_bbW) && mainFrame != g_frame + 1;
+    if (isMain) { mainFrame = g_frame + 1; mainSeen = true; }
+    bool mainV = isMain || noMain;
+    SkyViewNote(W, H, mainV, noMain);
+    int views = (int)(g_p[P_SKY_VIEWS].v + 0.5f);
+    if (!mainV && views < 2) {   // (SkySubstitute's fill: no cloud picture)
+        if (views <= 0 && g_skyGamePS) oPSSetShader(ctx, g_skyGamePS, 0, 0);
+        for (int k = 0; k < 8; ++k) if (rt[k]) rt[k]->Release();
+        if (ds) ds->Release();
+        return;
+    }
+    CloudSet* cs = mainV ? &g_cls[0] : SkyOtherSet(W, H);
+    g_cl = cs; g_clOther = !mainV;
+    cs->used = g_frame;
     // the cloud picture's size: a quarter, half, 80% or all of the screen's
     static const float kRes[4] = { 0.25f, 0.5f, 0.8f, 1.0f };
     int ri = (int)(g_p[P_SKY + 14].v + 0.5f);
     float sc = kRes[ri < 0 ? 0 : ri > 3 ? 3 : ri];
+    if (!mainV && sc > 0.5f) sc = 0.5f;   // 1.98r: the game's other views (SkyViews 2): half at most (whole pixels)
     UINT cw = (UINT)ceilf(W * sc), ch = (UINT)ceilf(H * sc);
-    if (W && (cw != g_cloudW || ch != g_cloudH || !g_cloudTex)) {
-        ID3D11DeviceChild* old[9] = { g_cloudSrv, g_cloudRtv, g_cloudTex, g_cloudSrv2, g_cloudRtv2, g_cloudTex2, g_cmSrv, g_cmRtv, g_cmTex };
+    if (W && (cw != cs->w || ch != cs->h || !cs->tex[0])) {
+        ID3D11DeviceChild* old[9] = { cs->srv[0], cs->rtv[0], cs->tex[0], cs->srv[1], cs->rtv[1], cs->tex[1], cs->cmSrv, cs->cmRtv, cs->cmTex };
         for (int k = 0; k < 9; ++k) if (old[k]) old[k]->Release();
-        g_cloudSrv = g_cloudSrv2 = 0; g_cloudRtv = g_cloudRtv2 = 0; g_cloudTex = g_cloudTex2 = 0; g_cmSrv = 0; g_cmRtv = 0; g_cmTex = 0;
+        cs->srv[0] = cs->srv[1] = 0; cs->rtv[0] = cs->rtv[1] = 0; cs->tex[0] = cs->tex[1] = 0; cs->cmSrv = 0; cs->cmRtv = 0; cs->cmTex = 0;
         D3D11_TEXTURE2D_DESC td = {};
         td.Width = cw; td.Height = ch; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; td.SampleDesc.Count = 1;
         td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-        if (SUCCEEDED(g_dev->CreateTexture2D(&td, 0, &g_cloudTex))) { g_dev->CreateRenderTargetView(g_cloudTex, 0, &g_cloudRtv); g_dev->CreateShaderResourceView(g_cloudTex, 0, &g_cloudSrv); }
-        if (SUCCEEDED(g_dev->CreateTexture2D(&td, 0, &g_cloudTex2))) { g_dev->CreateRenderTargetView(g_cloudTex2, 0, &g_cloudRtv2); g_dev->CreateShaderResourceView(g_cloudTex2, 0, &g_cloudSrv2); }
-        td.Width = g_cmW = (cw + 1) / 2; td.Height = g_cmH = (ch + 1) / 2;
-        if (SUCCEEDED(g_dev->CreateTexture2D(&td, 0, &g_cmTex))) { g_dev->CreateRenderTargetView(g_cmTex, 0, &g_cmRtv); g_dev->CreateShaderResourceView(g_cmTex, 0, &g_cmSrv); }
-        g_cloudW = cw; g_cloudH = ch;
-        g_cloudHist = false;
+        for (int k = 0; k < 2; ++k)
+            if (SUCCEEDED(g_dev->CreateTexture2D(&td, 0, &cs->tex[k]))) { g_dev->CreateRenderTargetView(cs->tex[k], 0, &cs->rtv[k]); g_dev->CreateShaderResourceView(cs->tex[k], 0, &cs->srv[k]); }
+        td.Width = cs->cmW = (cw + 1) / 2; td.Height = cs->cmH = (ch + 1) / 2;
+        if (SUCCEEDED(g_dev->CreateTexture2D(&td, 0, &cs->cmTex))) { g_dev->CreateRenderTargetView(cs->cmTex, 0, &cs->cmRtv); g_dev->CreateShaderResourceView(cs->cmTex, 0, &cs->cmSrv); }
+        cs->w = cw; cs->h = ch;
+        cs->hist = false;
+        ++g_skyRemakeN;   // (1.98g: counted)
     }
-    ID3D11RenderTargetView* curRtv = g_cloudCur ? g_cloudRtv2 : g_cloudRtv;
-    ID3D11ShaderResourceView* curSrv = g_cloudCur ? g_cloudSrv2 : g_cloudSrv;
-    ID3D11ShaderResourceView* prevSrv = g_cloudCur ? g_cloudSrv : g_cloudSrv2;
+    ID3D11RenderTargetView* curRtv = cs->rtv[cs->cur];
+    ID3D11ShaderResourceView* curSrv = cs->srv[cs->cur];
+    ID3D11ShaderResourceView* prevSrv = cs->srv[cs->cur ^ 1];
     // this frame's camera / viewProjection, copied on the GPU from the sky VS's constants (cb1[7..14])
     bool vpOk = false;
     {
         ID3D11Buffer* vcb = 0;
         ctx->VSGetConstantBuffers(1, 1, &vcb);
-        if (vcb && g_vpBuf[0] && g_vpBuf[1]) {
+        if (vcb && cs->vpBuf[0] && cs->vpBuf[1]) {
             D3D11_BUFFER_DESC bd;
             vcb->GetDesc(&bd);
             if (bd.ByteWidth >= 240) {
                 D3D11_BOX box = { 112, 0, 0, 240, 1, 1 };
-                ctx->CopySubresourceRegion(g_vpBuf[g_cloudCur], 0, 0, 0, 0, vcb, 0, &box);
+                ctx->CopySubresourceRegion(cs->vpBuf[cs->cur], 0, 0, 0, 0, vcb, 0, &box);
                 vpOk = true;
             }
         }
         if (vcb) vcb->Release();
     }
-    if (!vpOk) g_cloudHist = false;
-    bool ok = W && curRtv && curSrv && vpOk && g_cmRtv && g_resolvePS;
+    if (!vpOk || !mainV) cs->hist = false;   // (an other view: none: one of them may be a cube's faces by turns)
+    bool ok = W && curRtv && curSrv && vpOk && cs->cmRtv && g_resolvePS;
     // the shadow map's place: around the camera, on whole texels (no swimming)
-    g_csOrigin[0] = floorf(g_cam[3][0] / kCsTexel) * kCsTexel - 128 * kCsTexel;
-    g_csOrigin[2] = floorf(g_cam[3][2] / kCsTexel) * kCsTexel - 128 * kCsTexel;
-    g_csOrigin[1] = g_cam[3][1];
-    g_csOk = ok && g_csRtv && g_csPS;
-    g_skyDepthOk = g_air.depth != 0;
+    // 1.96o: the map drawn every other frame, its place moved only with it (readers keep the one it was drawn for: 6.4 km
+    // across, the camera a few metres off it at most; the clouds' shadows move slowly)
+    static bool csDrawn;
+    bool csNow = mainV && (!csDrawn || !(g_frame & (g_nightF > 0.7f ? 3 : 1)));   // (1.98b: at night, the moon's faint ones, every 4th)
+    if (csNow) {
+        g_csOrigin[0] = floorf(g_cam[3][0] / kCsTexel) * kCsTexel - 128 * kCsTexel;
+        g_csOrigin[2] = floorf(g_cam[3][2] / kCsTexel) * kCsTexel - 128 * kCsTexel;
+        g_csOrigin[1] = g_cam[3][1];
+    }
+    if (mainV) {
+        g_csOk = ok && g_csRtv && g_csPS;
+        if (!g_csOk) csDrawn = false;
+        g_skyDepthOk = g_air.depth != 0;
+    }
     SkyFill(ctx, ok ? W : 0, ok ? H : 0);
     ctx->PSSetConstantBuffers(11, 1, &g_skyCb);
     ctx->PSSetSamplers(8, 1, &g_sText);
@@ -919,28 +1071,30 @@ static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
         ID3D11ShaderResourceView* none[4] = {};
         ctx->PSSetShaderResources(10, 4, none);
         ctx->OMSetBlendState(0, 0, 0xffffffff);
-        ID3D11ShaderResourceView* in[3] = { g_vpSrv[g_cloudCur], g_vpSrv[g_cloudCur ^ 1], prevSrv };
+        ID3D11ShaderResourceView* in[3] = { cs->vpSrv[cs->cur], cs->vpSrv[cs->cur ^ 1], prevSrv };
         ctx->PSSetShaderResources(11, 3, in);
         // the march: an eighth of the size; its pixel centres on this frame's quarter-size pixel of each 2x2
-        ctx->OMSetRenderTargets(1, &g_cmRtv, 0);   // (the game's depth unbound: it can be read now)
-        ctx->PSSetShaderResources(15, 1, &g_air.depth);   // the scene's depth: skip what the city hides
+        ctx->OMSetRenderTargets(1, &cs->cmRtv, 0);   // (the game's depth unbound: it can be read now)
+        ctx->PSSetShaderResources(15, 1, mainV ? &g_air.depth : none);   // the scene's depth: skip what the city hides
         ctx->PSSetSamplers(9, 1, &g_sPoint);
-        D3D11_VIEWPORT mv = { 0, 0, W * sc * 0.5f, H * sc * 0.5f, 0, 1 };   // half the cloud picture: the 2x2 shift is in the shader
+        D3D11_VIEWPORT mv = { 0, 0, cw * 0.5f, ch * 0.5f, 0, 1 };   // (1.98r: the picture's whole size: 512 x 80 % left its last column empty: a seam)   // half the cloud picture: the 2x2 shift is in the shader
         ctx->RSSetViewports(1, &mv);
-        ProfMark(ctx, PR_CLOUDS, 0);   // (1.96f: timed)
+        int skyTest = (int)(g_p[260].v + 0.5f);   // 1.96n: SkyTest
+        if (mainV) ProfMark(ctx, PR_CLOUDS, 0);   // (1.96f: timed; 1.98h: the main view's)
         oPSSetShader(ctx, g_cloudPS, 0, 0);
-        Replay(ctx, d);
+        if (skyTest != 1) Replay(ctx, d);
         // the resolve: the quarter-size picture
         ctx->OMSetRenderTargets(1, &curRtv, 0);
-        ctx->PSSetShaderResources(14, 1, &g_cmSrv);
-        D3D11_VIEWPORT cv = { 0, 0, W * sc, H * sc, 0, 1 };
+        ctx->PSSetShaderResources(14, 1, &cs->cmSrv);
+        D3D11_VIEWPORT cv = { 0, 0, (float)cw, (float)ch, 0, 1 };
         ctx->RSSetViewports(1, &cv);
         oPSSetShader(ctx, g_resolvePS, 0, 0);
-        Replay(ctx, d);
-        ProfMark(ctx, PR_CLOUDS, 1);
+        if (skyTest != 1) Replay(ctx, d);
+        if (mainV) ProfMark(ctx, PR_CLOUDS, 1);
         ctx->PSSetShaderResources(14, 2, none);
         // the cloud-shadow map
-        if (g_csOk) {
+        if (g_csOk && csNow && skyTest != 2) {
+            csDrawn = true;
             ctx->OMSetRenderTargets(1, &g_csRtv, 0);
             D3D11_VIEWPORT sv = { 0, 0, 256, 256, 0, 1 };
             ctx->RSSetViewports(1, &sv);
@@ -949,11 +1103,13 @@ static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
             Replay(ctx, d);
             ProfMark(ctx, PR_CSHADOW, 1);
         }
-        CsSunHere(ctx);   // (1.93: for the game's corona)
-        ProfMark(ctx, PR_PROBE, 0);
-        SkyProbePass(ctx, d);   // 1.46: the sky probe for the reflections (a face a frame)
-        ProfMark(ctx, PR_PROBE, 1);
-        WetGlossPass(ctx, d, W, H, g_vpSrv[g_cloudCur]);   // the game's gloss before its lighting (gamewet.inc)
+        if (mainV) {
+            CsSunHere(ctx);   // (1.93: for the game's corona)
+            ProfMark(ctx, PR_PROBE, 0);
+            if (skyTest != 3) SkyProbePass(ctx, d);   // 1.46: the sky probe for the reflections (a face a frame)
+            ProfMark(ctx, PR_PROBE, 1);
+            WetGlossPass(ctx, d, W, H, cs->vpSrv[cs->cur]);   // the game's gloss before its lighting (gamewet.inc)
+        }
         oPSSetShader(ctx, g_skyPS, 0, 0);
         ctx->OMSetRenderTargets(8, rt, ds);
         ctx->RSSetViewports(nvp, vp);
@@ -961,11 +1117,15 @@ static void SkyBeforeDraw(ID3D11DeviceContext* ctx, const DrawCall& d)
         if (bs) bs->Release();
         ctx->PSSetShaderResources(13, 1, none);
         ctx->PSSetShaderResources(10, 1, &curSrv);
-        g_cloudHist = true;
-        g_cloudCur ^= 1;
-        ProfMark(ctx, PR_SKYDRAW, 0);   // (1.96f: the sky draw itself, ended in AfterDraw)
-        g_skyDrawTimed = true;
+        cs->hist = false;   // 1.98j: no history (as before 1.98h): with it the clouds shook, the buildings' edges smeared
+                            // up into them and their rims grew (the user, 2026-10-26)
+        cs->cur ^= 1;
+        if (mainV) {
+            ProfMark(ctx, PR_SKYDRAW, 0);   // (1.96f: the sky draw itself, ended in AfterDraw)
+            g_skyDrawTimed = true;
+        }
     }
+    g_cl = &g_cls[0]; g_clOther = false;   // (SkyFill's others: the main view's)
     for (int k = 0; k < 8; ++k) if (rt[k]) rt[k]->Release();
     if (ds) ds->Release();
 }

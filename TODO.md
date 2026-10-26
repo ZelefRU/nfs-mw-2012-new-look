@@ -10,6 +10,19 @@ Rule: features first, polish later. (check) = done, not yet seen in game.
   phantom sharp shadows in the mountains; buildings' shadows popping when the camera turns; far shadows of moving
   things in steps; the shadow pass's cost.
 - Squares on a car's door standing on grass (cause not found; probably grass shadows at a coarse map texel).
+- 1.98a ReflectionSharp (full-size detail of reduced reflections): flickers, gains ~0.3 ms at most; default off.
+  Needs the per-frame rotation of the sample and full-size history to be steady; low value (the reflections' rays are
+  ~1.4 ms at 70 %).
+- Procedural grass (1.97, grass.inc), left as it is at 1.97p (user, 2026-10-26):
+  - A puddle on paving next to a lawn still shows through the blades. 1.97p stopped lawns and blades reflecting
+    anything; not confirmed to be enough. Next ideas: cut the half-size reflection's spread at lawn pixels, or let no
+    puddle within ~0.5 m of the lawn map's edge.
+  - The car shows through the blades. 1.97m's lawn stencil did not fix it; cause unknown. Ask for screenshots with
+    Grass 0 / 1.
+  - Shadows on the blades may still jump in soft squares (the sun shadow's half-size smoothing?) if 1.97p's map
+    history did not cure it.
+  - Cost: ~3.3 ms at range 100 / density 5. Stage 4 optimisation still to do.
+  - Optional: a pressed trail left behind the car.
 - Lamps: lights not always going out when a post is knocked down; lamp shadow faces redrawn one by one; night cost.
 - Parallax: a zigzag seam along some slabs; more wall shaders to rewrite.
 - Some ripple left in the AO.
@@ -79,6 +92,24 @@ Rule: features first, polish later. (check) = done, not yet seen in game.
 - Not yet tried in game: copies (Ctrl+D) and worldtools/bake.bat.
 
 ## Optimisation (1.96 started it; the priority now)
+- 1.98b plan (user, 2026-10-26; target -40..50 % of NewLook: day ~16 -> 8-10 ms, night ~25 -> 12-15 ms at 5120x1440):
+  1. (1.98b, check) the pass profile: Ctrl+Shift+B, by day and at night; the user sends scripts\NewLook_profile.txt.
+  2. The lighting split: the smooth terms at half size, a lean full-size pass.
+  3. The lamps at night: their diffuse at half size, shadows for the main lamps of a tile only.
+  4. The sky and clouds spread over frames (1.98b: cheaper at night, check the look at dusk).
+  5. What several passes compute (wetness, puddles, the lawns) once a frame.
+  Also: does the game's own sun light draw (PR_GAMESUN) still need to run under ours?
+  1.98c profile (2560x1440, reliable): day 7.2 ms = reflections 1.85, relief 1.12, bounce 0.75, sky occl. 0.45, sky 0.4
+  (+0.3 untimed), grading 0.38, the rest base; night 11.4 = lamps 5.2 (full size: LampResolution 0), reflections 1.8,
+  our sky 1.2 untimed (unknown: 1.98d profile), bounce 0.8, relief 0.6. The game's sun light is 0.2: not worth it.
+  Next by size: the lamps (half size if the user agrees, cheaper screen shadows), the night sky's 1.2, reflections,
+  relief's sky part, the half-res pass (sky occlusion / bounce: fewer samples a frame with the history), grading.
+  1.98e: lamps at half size split (the strongest lamp of a pixel at full size). If the user still sees a loss: the
+  2nd strongest at full size too; or the half pass's other screen shadows fewer. If it holds: make it the default and
+  measure the fallback's share (thin things: trees, fences).
+  1.98e profile: the split holds (user: "hardly drops"). Next by size, night 10.2 / day 6.5 ms: the sun pass (relief
+  1.44 at night, bounce fetch 0.81 (?), the split 1.38), reflections 1.7, our sky shader in the game's draw (+1.0 at
+  night, +0.8 by day; stars 0.3), grading 0.4, tiles 0.5 (1.98f). Before a release: remove PerfTest (266) and SkyTest (260).
 - AMD (a Nexus player (AMD), RX 9060 XT, 1080p, the game's AA off: 120 -> ~15 FPS): cause not known. Wanted: his
   scripts\NewLook.log (the "timing:", "cpu:", "gpu:" lines) and NewLook_bench_report.txt after B. 1.96 took the
   arrays indexed at run time out of LampShade / PS_Tiles / LampGlow (AMD: scratch memory); next suspects: PS_Sun's
@@ -112,3 +143,21 @@ Rule: features first, polish later. (check) = done, not yet seen in game.
 ## Later
 - PS_SunMask: does it read every cascade per tap (0.9 ms; needs a harness).
 - Modern lighting with real roughness data (with the materials work).
+- 1.98h: traffic: with the frame map, off / on (by day and at night) to see which part of the game's frame grows; at night our lamps (car headlights among them?). Our sun-shadow casters' CPU (SsAfterDraw 1.7-2.4 ms a frame) if the frame ever gets CPU-bound. The sky's other views: what they are (the log's "sky: the game's views").
+- 1.98k: the far mountain stays hazy / bright under a storm sky (find its draw; our haze colour?). Storm clouds: sharp contour steps, worse with SkyFast 2.
+
+## Our own eye adaptation (replace the game's; planned 2026-10-26, after 1.98)
+The game's meters the whole frame's mean and pulls it to one mid-grey: a storm is brought back to a clear day's
+brightness; looking at dark wet ground brightens everything, the sky in view darkens it. EyeAdapt (< 1) only damps its
+answer and reads its value on the CPU (2 frames late; odd reads up to 7x off, 1.98ab's median hides them).
+- Exposure from the light, not the frame: sun + sky illuminance we know (time of day, SunDeck, ovUp), as a camera's
+  "sunny 16": a storm stays darker than a clear day.
+- The frame's metering only as a small correction (about +/- 1 EV): centre-weighted, sky and extremes left out, the
+  histogram's middle (as UE's); looking down or turning barely changes it. Night: more weight on the metering (lamps).
+- Eye-like speeds: slower to dark, faster to light; no feedback (the game's own value never used).
+- All on the GPU: a small pass at half res writes the 1x1 texture the game's tone mapping reads (no CPU read-back),
+  the game's own value put back after (as 1.98aa's restore).
+- Settings: mode (the game's / ours), how much darker a storm, the metering's range, the adaptation speed. 1.98w's
+  storm darkening becomes part of it.
+- First check: who else reads the 1x1 (bloom? the HUD? the odd 11.5 reads), the game's light units by time of day.
+- About 2 versions: diagnostics + the exposure behind a switch; then tuning by day / storm / night shots.
